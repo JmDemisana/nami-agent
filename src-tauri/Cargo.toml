@@ -1,0 +1,22 @@
+[package]
+name = "maru_desktop_tauri"
+version = "0.0.6"
+description = "Offline-first Tauri shell for Maru desktop applets"
+authors = ["Maru"]
+license = "GPL-3.0"
+edition = "2021"
+rust-version = "1.77.2"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+opt-level = 1
+lto = false
+codegen-units = 16
+panic = "abort"
+strip = "debuginfo"

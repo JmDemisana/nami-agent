@@ -1,10 +1,11 @@
-## Maru Desktop v0.0.2
+## Maru Desktop v0.0.6
 
 ### Changes
-- Fix Marucast QR to use local generation (no external dependencies)
-- Simplify desktop shell code
+- Moved the desktop app onto the new Tauri shell.
+- Tightened the launcher copy so it stays short and avoids repeating obvious UI state.
+- Refreshed the custom title bar styling and kept the Windows window controls wired for the Tauri shell.
+- Updated the repo README to document local Windows, Linux, and macOS build steps for the Tauri version.
 
-### Downloads
-- Maru-Desktop-win-x64.exe (64-bit installer)
-- Maru-Desktop-win-ia32.exe (32-bit portable)
-- maru-desktop-0.0.1-ia32.nsis.7z (compressed)
+### Windows Downloads
+- `Maru-Desktop-Setup-0.0.6-x64.msi`
+- `Maru-Desktop-0.0.6-x64.exe`

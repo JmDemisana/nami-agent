@@ -1,6 +1,6 @@
 # Maru Desktop
 
-Offline desktop shell for Maru applets. Built with Electron.
+Offline desktop shell for Maru applets. Built with Tauri.
 
 ## License
 
@@ -12,60 +12,14 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-## Building on macOS
-
-**Note:** Electron macOS builds can only be created on a macOS machine. You cannot cross-compile for macOS from Windows or Linux.
-
-If you have a Mac, follow these steps:
-
-### Prerequisites
-
-- macOS 12 or later
-- Node.js 20+
-- Xcode Command Line Tools
-
-### Setup
-
-1. Clone the repo:
-```bash
-git clone https://github.com/JmDemisana/maru-desktop.git
-cd maru-desktop
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Build web assets from the main website repo:
-```bash
-# In maru-website:
-npm run build:desktop-web
-
-# Copy to desktop repo:
-cp -r desktop-web-dist/ /path/to/maru-desktop/
-```
-
-### Building for macOS
-
-```bash
-npm run dist -- --mac dmg
-```
-
-This creates a `.dmg` installer in the `dist/` folder.
-
-### Running Development
-
-```bash
-npm start
-```
-
 ## Building on Windows
 
 ### Prerequisites
 
 - Windows 10/11
 - Node.js 20+
+- Rust toolchain (`rustup`)
+- Visual Studio 2022 Build Tools with MSVC C++ tools
 
 ### Setup
 
@@ -80,35 +34,44 @@ cd maru-desktop
 npm install
 ```
 
-3. Build web assets from the main website repo:
+3. Build web assets from the main Maru website repo:
 ```bash
-# In maru-website:
+# In the main Maru website repo:
 npm run build:desktop-web
 
-# Copy to desktop repo:
+# Copy the built folder into this repo:
 cp -r desktop-web-dist/ C:\path\to\maru-desktop\
 ```
 
 ### Building for Windows
 
-**Portable (no install):**
 ```bash
-npm run dist -- --win portable
+npm run tauri -- build --bundles msi
 ```
 
-**Installer:**
-```bash
-npm run dist -- --win nsis
-```
-
-The executables will be in the `dist/` folder.
+This creates a Windows installer in `src-tauri/target/release/bundle/msi/`.
 
 ## Building on Linux
 
 ### Prerequisites
 
-- Linux (Ubuntu 20.04+ recommended)
+- Linux host or VM
 - Node.js 20+
+- Rust toolchain (`rustup`)
+- `pkg-config`
+- `libgtk-3-dev`
+- `libayatana-appindicator3-dev`
+- `librsvg2-dev`
+- `patchelf`
+- `libwebkit2gtk-4.1-dev`
+
+Linux bundles must be built on Linux.
+
+### One-line install
+
+```bash
+git clone https://github.com/JmDemisana/maru-desktop.git && cd maru-desktop && bash ./scripts/install-linux.sh
+```
 
 ### Setup
 
@@ -118,36 +81,60 @@ cd maru-desktop
 npm install
 ```
 
-Copy web assets similarly to Windows.
+Build the web assets in the main Maru website repo first, then copy `desktop-web-dist/` into this repo.
 
 ### Building for Linux
 
 ```bash
-npm run dist -- --linux AppImage
-# or
-npm run dist -- --linux deb
+npm run tauri -- build --bundles deb,appimage
 ```
 
-## CI/CD
+This creates Linux bundles in `src-tauri/target/release/bundle/`.
 
-GitHub Actions automatically builds for all platforms (Windows, macOS, Linux) when a git tag is pushed:
+## Building on macOS
+
+### Prerequisites
+
+- macOS 12 or later
+- Node.js 20+
+- Rust toolchain (`rustup`)
+- Xcode Command Line Tools
+
+macOS bundles must be built on macOS.
+
+### One-line install
 
 ```bash
-git tag v0.0.1
-git push origin v0.0.1
+git clone https://github.com/JmDemisana/maru-desktop.git && cd maru-desktop && bash ./scripts/install-macos.sh
 ```
 
-This triggers builds for all platforms and creates a GitHub Release with all artifacts.
+### Setup
+
+```bash
+git clone https://github.com/JmDemisana/maru-desktop.git
+cd maru-desktop
+npm install
+```
+
+Build the web assets in the main Maru website repo first, then copy `desktop-web-dist/` into this repo.
+
+### Building for macOS
+
+```bash
+npm run tauri -- build --bundles dmg
+```
+
+This creates a macOS bundle in `src-tauri/target/release/bundle/dmg/`.
 
 ## Project Structure
 
-- `src/` - Electron main process code
-- `src/preload.ts` - Preload script for IPC
-- `dist/` - Built executables
-- `desktop-web-dist/` - Web assets (copy from maru-website)
+- `src-tauri/` - Tauri host app
+- `src/desktop/` - Desktop web app entry
+- `desktop-web-dist/` - Built web assets copied from the main Maru repo
+- `tauri-launcher.html` - Offline launcher shell
 
 ## Notes
 
-- The desktop app runs the Maru website locally in an embedded browser
+- The desktop app runs the offline web applets in a native Tauri shell
 - No internet required after initial setup
 - Uses local storage for settings

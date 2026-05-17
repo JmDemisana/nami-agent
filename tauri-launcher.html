@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>Maru Desktop</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --desktop-topbar-height: 64px;
+        --desktop-border: rgba(255, 255, 255, 0.08);
+        --desktop-surface: #0f141c;
+        --desktop-surface-soft: rgba(20, 28, 40, 0.92);
+        --desktop-text: #f2f6ff;
+        --desktop-muted: rgba(242, 246, 255, 0.72);
+        --desktop-hover: rgba(255, 255, 255, 0.12);
+        --desktop-danger-hover: #ef6c78;
+        --desktop-card-surface: rgba(6, 13, 26, 0.82);
+        --desktop-card-border: rgba(255, 255, 255, 0.08);
+        --desktop-accent: rgba(120, 176, 255, 0.55);
+        --desktop-accent-strong: rgba(146, 228, 210, 0.96);
+        --desktop-panel-bg: rgba(10, 18, 34, 0.72);
+        --desktop-panel-strong: rgba(14, 27, 47, 0.88);
+        --desktop-font: "Manrope", "Segoe UI", "Helvetica Neue", sans-serif;
+        --desktop-title-font: "Trebuchet MS", "Gill Sans", "Gill Sans MT", "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--desktop-surface);
+        color: var(--desktop-text);
+        font-family: var(--desktop-font);
+      }
+
+      body {
+        border: 1px solid var(--desktop-border);
+      }
+
+      body[data-visual-style="amoled"] {
+        --desktop-surface: #000000;
+        --desktop-surface-soft: rgba(0, 0, 0, 0.96);
+        --desktop-border: rgba(255, 255, 255, 0.1);
+        --desktop-text: rgba(244, 247, 255, 0.98);
+        --desktop-muted: rgba(184, 194, 212, 0.78);
+        --desktop-hover: rgba(255, 255, 255, 0.08);
+        --desktop-card-surface: rgba(5, 5, 5, 0.95);
+      }
+
+      body[data-visual-style="quiet_tide"] {
+        --desktop-surface: #09111e;
+        --desktop-surface-soft: rgba(9, 15, 28, 0.9);
+        --desktop-border: rgba(187, 215, 255, 0.14);
+        --desktop-text: rgba(240, 246, 255, 0.97);
+        --desktop-muted: rgba(195, 210, 228, 0.8);
+        --desktop-hover: rgba(235, 245, 255, 0.08);
+        --desktop-card-surface: rgba(8, 17, 30, 0.86);
+        --desktop-panel-bg: rgba(10, 18, 34, 0.76);
+        --desktop-panel-strong: rgba(14, 27, 47, 0.88);
+        --desktop-font: "Manrope", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
+      body[data-visual-style="dark_corporate"] {
+        --desktop-surface: #111315;
+        --desktop-surface-soft: rgba(24, 25, 26, 0.96);
+        --desktop-border: rgba(58, 59, 60, 1);
+        --desktop-text: rgba(228, 230, 235, 0.96);
+        --desktop-muted: rgba(176, 179, 184, 0.9);
+        --desktop-hover: rgba(255, 255, 255, 0.08);
+        --desktop-card-surface: rgba(24, 25, 26, 0.92);
+        --desktop-panel-bg: rgba(32, 35, 39, 0.92);
+        --desktop-panel-strong: rgba(36, 37, 38, 0.96);
+        --desktop-font: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
+      body[data-visual-style="urple"] {
+        --desktop-surface: #1d0a31;
+        --desktop-surface-soft: rgba(69, 24, 120, 0.56);
+        --desktop-border: rgba(255, 202, 255, 0.22);
+        --desktop-text: rgba(255, 245, 255, 0.97);
+        --desktop-muted: rgba(245, 222, 255, 0.82);
+        --desktop-hover: rgba(255, 214, 251, 0.1);
+        --desktop-card-surface: rgba(30, 10, 50, 0.82);
+        --desktop-panel-bg: rgba(61, 24, 104, 0.58);
+        --desktop-panel-strong: rgba(87, 36, 134, 0.7);
+        --desktop-font: "Nunito", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
+      body.card-hover-nudge-disabled .desktop-applet-card:hover {
+        transform: none;
+      }
+
+      .desktop-shell {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        grid-template-rows: var(--desktop-topbar-height) minmax(0, 1fr);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 48%),
+          var(--desktop-surface);
+      }
+
+      .desktop-titlebar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: stretch;
+        background:
+          linear-gradient(135deg, rgba(120, 140, 255, 0.12), rgba(146, 228, 210, 0.08)),
+          var(--desktop-panel-bg);
+        border-bottom: 1px solid var(--desktop-border);
+        user-select: none;
+        backdrop-filter: blur(20px) saturate(140%);
+        -webkit-backdrop-filter: blur(20px) saturate(140%);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+      }
+
+      .desktop-titlecopy {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 16px;
+      }
+
+      .desktop-titlecopy-text {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .desktop-brand-badge {
+        width: 38px;
+        height: 38px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        flex-shrink: 0;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05)),
+          var(--desktop-panel-strong);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow:
+          0 10px 24px rgba(0, 0, 0, 0.22),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      .desktop-brand-badge img {
+        width: 24px;
+        height: 24px;
+        object-fit: contain;
+      }
+
+      .desktop-subhead {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .desktop-status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        border: 1px solid rgba(146, 228, 210, 0.24);
+        background: rgba(146, 228, 210, 0.1);
+        color: var(--desktop-accent-strong);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .desktop-status-pill::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: currentColor;
+        box-shadow: 0 0 12px currentColor;
+      }
+
+      .desktop-nav {
+        width: 38px;
+        height: 38px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        display: inline-grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--desktop-text);
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+      }
+
+      .desktop-nav:hover {
+        background: var(--desktop-hover);
+        border-color: rgba(255, 255, 255, 0.18);
+        transform: translateY(-1px);
+      }
+
+      .desktop-nav[hidden] {
+        display: none;
+      }
+
+      .desktop-titlecopy strong {
+        font-family: var(--desktop-title-font);
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+      }
+
+      .desktop-titlecopy span {
+        font-size: 0.77rem;
+        color: var(--desktop-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .desktop-controls {
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+        padding: 0 14px 0 0;
+      }
+
+      .desktop-control {
+        width: 38px;
+        height: 38px;
+        align-self: center;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--desktop-text);
+        cursor: pointer;
+        transition:
+          background 120ms ease,
+          color 120ms ease,
+          transform 120ms ease,
+          border-color 120ms ease;
+      }
+
+      .desktop-control:hover {
+        background: var(--desktop-hover);
+        border-color: rgba(255, 255, 255, 0.18);
+        transform: translateY(-1px);
+      }
+
+      .desktop-control.close:hover {
+        background: var(--desktop-danger-hover);
+      }
+
+      .desktop-control svg {
+        width: 12px;
+        height: 12px;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        fill: none;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .desktop-body {
+        min-height: 0;
+        position: relative;
+      }
+
+      .desktop-home,
+      .desktop-applet-stage {
+        position: absolute;
+        inset: 0;
+        min-height: 0;
+      }
+
+      .desktop-home {
+        padding: 22px;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 18px;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.03), transparent 42%),
+          var(--desktop-surface);
+      }
+
+      .desktop-home-copy {
+        display: grid;
+        gap: 6px;
+      }
+
+      .desktop-home-copy h1 {
+        margin: 0;
+        font-family: var(--desktop-title-font);
+        font-size: 1.55rem;
+      }
+
+      .desktop-home-copy p {
+        margin: 0;
+        color: var(--desktop-muted);
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+
+      .offline-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(98, 148, 228, 0.15);
+        border: 1px solid rgba(98, 148, 228, 0.3);
+        color: var(--desktop-text);
+        font-size: 0.84rem;
+        line-height: 1.45;
+      }
+
+      .desktop-home-copy p,
+      .offline-banner span,
+      .desktop-applet-copy {
+        text-wrap: balance;
+      }
+
+      .desktop-applet-list {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 260px));
+        align-content: start;
+        gap: 18px;
+        overflow: auto;
+        padding: 40px 6px 6px;
+      }
+
+      .desktop-applet-card {
+        text-align: left;
+        width: 260px;
+        height: 300px;
+        position: relative;
+        border: 1px solid var(--desktop-card-border);
+        border-radius: 16px;
+        background: var(--desktop-card-surface);
+        color: var(--desktop-text);
+        padding: 5.5rem 1.6rem 1.6rem;
+        display: grid;
+        gap: 0.4rem;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+      }
+
+      .desktop-applet-card:hover {
+        transform: translateY(-2px) scale(1.01);
+        box-shadow:
+          0 0 0 1px rgba(120, 140, 255, 0.24),
+          0 12px 30px rgba(0, 0, 0, 0.65),
+          0 0 22px rgba(120, 140, 255, 0.18);
+      }
+
+      .desktop-applet-card.active {
+        border-color: var(--desktop-accent);
+        background: rgba(98, 148, 228, 0.14);
+      }
+
+      .desktop-applet-kicker {
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(160, 199, 255, 0.78);
+        justify-self: center;
+      }
+
+      .desktop-folder-icon {
+        width: 86px;
+        height: 86px;
+        position: absolute;
+        top: -34px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-radius: 16px;
+        padding: 10px;
+        background: rgba(5, 8, 16, 0.82);
+        border: 1px solid var(--desktop-border);
+        box-shadow:
+          0 12px 30px rgba(0, 0, 0, 0.65),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .desktop-folder-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .folder-name {
+        margin-top: 0.6rem;
+        margin-bottom: 0.25rem;
+        font-size: 1.35rem;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .desktop-applet-copy {
+        margin: 0;
+        color: var(--desktop-muted);
+        font-size: 0.84rem;
+        line-height: 1.52;
+        text-align: center;
+      }
+
+      .folder-actions {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: auto;
+      }
+
+      .desktop-applet-open {
+        display: block;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--desktop-text);
+        font-size: 0.82rem;
+        text-align: center;
+      }
+
+      .desktop-applet-stage {
+        display: none;
+      }
+
+      .desktop-applet-stage.is-visible {
+        display: block;
+      }
+
+      .desktop-home.is-hidden {
+        display: none;
+      }
+
+      .desktop-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #0f141c;
+      }
+
+      @media (max-width: 900px) {
+        .desktop-status-pill {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="desktop-shell">
+      <header class="desktop-titlebar">
+        <div class="desktop-titlecopy" data-tauri-drag-region>
+          <button class="desktop-nav" id="desktop-back" aria-label="Back" hidden>
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M7.5 2.5l-4 3.5 4 3.5M4 6h4.5" />
+            </svg>
+          </button>
+          <div class="desktop-brand-badge" aria-hidden="true">
+            <img src="/icon-192.png" alt="" />
+          </div>
+          <div class="desktop-titlecopy-text">
+            <strong id="desktop-title">Maru Desktop</strong>
+            <div class="desktop-subhead">
+              <span id="desktop-subtitle">Applets</span>
+              <span class="desktop-status-pill" id="desktop-status-pill">Offline</span>
+            </div>
+          </div>
+        </div>
+        <div class="desktop-controls">
+          <button class="desktop-control" id="desktop-minimize" aria-label="Minimize">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2 6h8" />
+            </svg>
+          </button>
+          <button class="desktop-control" id="desktop-maximize" aria-label="Maximize">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <rect x="2.5" y="2.5" width="7" height="7" />
+            </svg>
+          </button>
+          <button class="desktop-control close" id="desktop-close" aria-label="Close">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      <div class="desktop-body">
+        <section class="desktop-home" id="desktop-home">
+          <div class="desktop-home-copy">
+            <h1>Applets</h1>
+            <p>Local tools, no internet needed.</p>
+          </div>
+          <div class="offline-banner">
+            <strong>Offline only</strong>
+            <span>Online features can come later.</span>
+          </div>
+          <div class="desktop-applet-list" id="desktop-applet-list"></div>
+        </section>
+        <section class="desktop-applet-stage" id="desktop-applet-stage">
+          <iframe
+            class="desktop-frame"
+            id="desktop-frame"
+            src="about:blank"
+            title="Maru Desktop Applet"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
+        </section>
+      </div>
+    </div>
+    <script>
+      const DESKTOP_APPLETS = [
+        {
+          id: "photo-serve",
+          name: "PhotoServe",
+          route: "/desktop-shell.html?applet=photo-serve",
+          kicker: "Workstation",
+          icon: "/icons/applet-photo-serve.svg",
+          description: "Crop, lay out, export, and print 4R sheets.",
+        },
+        {
+          id: "cup-cupper-cuppers",
+          name: "Cup-Cupper-Cuppers",
+          route: "/desktop-shell.html?applet=cup-cupper-cuppers",
+          kicker: "Game",
+          icon: "/icons/applet-cup-cupper-cuppers.svg",
+          description: "A local shuffled-cup memory duel.",
+        },
+        {
+          id: "dael-single",
+          name: "Dael or No Dael",
+          route: "/desktop-shell.html?applet=dael-single",
+          kicker: "Game",
+          icon: "/icons/applet-dael.svg",
+          description: "Single-player deal game with local stats.",
+        },
+        {
+          id: "tup-grade-solver",
+          name: "TUP Grade Solver",
+          route: "/desktop-shell.html?applet=tup-grade-solver",
+          kicker: "Utility",
+          icon: "/icons/applet-tup-grade.svg",
+          description: "Check the grade you still need and export it.",
+        },
+        {
+          id: "schededit",
+          name: "SchedEdit",
+          route: "/desktop-shell.html?applet=schededit",
+          kicker: "Planner",
+          icon: "/icons/applet-schededit.svg",
+          description: "Plan your week locally.",
+        },
+      ];
+
+      const appletList = document.getElementById("desktop-applet-list");
+      const frame = document.getElementById("desktop-frame");
+      const home = document.getElementById("desktop-home");
+      const appletStage = document.getElementById("desktop-applet-stage");
+      const backButton = document.getElementById("desktop-back");
+      const title = document.getElementById("desktop-title");
+      const subtitle = document.getElementById("desktop-subtitle");
+      const statusPill = document.getElementById("desktop-status-pill");
+
+      let activeAppletId = null;
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function applyStoredDesktopAppearance() {
+        try {
+          const raw = window.localStorage.getItem("app-options");
+          const parsed = raw ? JSON.parse(raw) : null;
+          const visualStyle = parsed?.visualStyle;
+          const disableCardHoverNudge = parsed?.disableCardHoverNudge === true;
+          const randomStyles = [
+            "it_started_here",
+            "quiet_tide",
+            "amoled",
+            "dark_corporate",
+            "urple",
+          ];
+          const appliedStyle =
+            visualStyle === "random_refresh"
+              ? randomStyles[Math.floor(Math.random() * randomStyles.length)]
+              : visualStyle;
+
+          if (appliedStyle && appliedStyle !== "it_started_here") {
+            document.body.dataset.visualStyle = appliedStyle;
+          } else {
+            delete document.body.dataset.visualStyle;
+          }
+
+          document.body.classList.toggle("card-hover-nudge-disabled", disableCardHoverNudge);
+        } catch {
+          delete document.body.dataset.visualStyle;
+          document.body.classList.remove("card-hover-nudge-disabled");
+        }
+      }
+
+      function setActiveCard(nextCard) {
+        const cards = Array.from(document.querySelectorAll(".desktop-applet-card"));
+        cards.forEach((card) => {
+          card.classList.toggle("active", card === nextCard);
+        });
+      }
+
+      function showHome() {
+        activeAppletId = null;
+        setActiveCard(null);
+        home?.classList.remove("is-hidden");
+        appletStage?.classList.remove("is-visible");
+        if (backButton) {
+          backButton.hidden = true;
+        }
+        if (title) {
+          title.textContent = "Maru Desktop";
+        }
+        if (subtitle) {
+          subtitle.textContent = "Applets";
+        }
+        if (statusPill) {
+          statusPill.textContent = "Offline";
+        }
+        if (frame) {
+          frame.src = "about:blank";
+        }
+      }
+
+      function openApplet(card) {
+        if (!card || !frame) {
+          return;
+        }
+
+        activeAppletId = card.dataset.appletId || null;
+        setActiveCard(card);
+        home?.classList.add("is-hidden");
+        appletStage?.classList.add("is-visible");
+        if (backButton) {
+          backButton.hidden = false;
+        }
+        if (title) {
+          title.textContent = card.querySelector(".folder-name")?.textContent || "Applet";
+        }
+        if (subtitle) {
+          subtitle.textContent = card.querySelector(".desktop-applet-kicker")?.textContent || "Applet";
+        }
+        if (statusPill) {
+          statusPill.textContent = "Offline";
+        }
+        frame.src = card.dataset.route || "/desktop-shell.html";
+      }
+
+      function renderApplets() {
+        if (!appletList) {
+          return;
+        }
+
+        const markup = DESKTOP_APPLETS.map(
+          (applet) => `
+            <button
+              class="desktop-applet-card"
+              data-applet-id="${escapeHtml(applet.id)}"
+              data-route="${escapeHtml(applet.route)}"
+              type="button"
+            >
+              <span class="desktop-folder-icon" aria-hidden="true">
+                <img
+                  src="${escapeHtml(applet.icon)}"
+                  alt=""
+                  decoding="async"
+                />
+              </span>
+              <span class="desktop-applet-kicker">${escapeHtml(applet.kicker)}</span>
+              <div class="folder-name">${escapeHtml(applet.name)}</div>
+              <p class="desktop-applet-copy">${escapeHtml(applet.description)}</p>
+              <div class="folder-actions">
+                <span class="desktop-applet-open">Open</span>
+              </div>
+            </button>`,
+        ).join("");
+
+        appletList.innerHTML = markup;
+        Array.from(appletList.querySelectorAll(".desktop-applet-card")).forEach((card) => {
+          card.addEventListener("click", () => openApplet(card));
+        });
+      }
+
+      async function bindWindowControls() {
+        const tauriWindowNamespace = window.__TAURI__?.window;
+        const getCurrentWindow = tauriWindowNamespace?.getCurrentWindow;
+
+        if (typeof getCurrentWindow !== "function") {
+          console.warn("[maru-desktop-tauri] window API unavailable");
+          return;
+        }
+
+        const appWindow = getCurrentWindow();
+
+        const safeWindowAction = (label, handler) => async () => {
+          try {
+            await handler();
+          } catch (error) {
+            console.error(`[maru-desktop-tauri] ${label} failed`, error);
+          }
+        };
+
+        document
+          .getElementById("desktop-minimize")
+          ?.addEventListener("click", safeWindowAction("minimize", () => appWindow.minimize()));
+
+        document
+          .getElementById("desktop-maximize")
+          ?.addEventListener(
+            "click",
+            safeWindowAction("toggleMaximize", () => appWindow.toggleMaximize()),
+          );
+
+        document
+          .getElementById("desktop-close")
+          ?.addEventListener("click", safeWindowAction("close", () => appWindow.close()));
+      }
+
+      backButton?.addEventListener("click", showHome);
+
+      window.addEventListener("storage", (event) => {
+        if (event.key === "app-options" || event.key === "site-lang") {
+          applyStoredDesktopAppearance();
+        }
+      });
+
+      applyStoredDesktopAppearance();
+      renderApplets();
+      showHome();
+      bindWindowControls();
+    </script>
+  </body>
+</html>

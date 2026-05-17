@@ -1,6 +1,6 @@
 {
   "name": "maru-desktop",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Maru Desktop - Offline applet shell",
   "author": "Maru <maru@example.com>",
   "license": "GPL-3.0",
@@ -8,9 +8,13 @@
   "main": "electron/main.mjs",
   "scripts": {
     "start": "electron .",
+    "start:tauri": "npm run tauri:dev",
     "build": "echo 'Web assets built in main repo, copy desktop-web-dist/ here first'",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "build": {
     "appId": "io.maru.desktop",
@@ -56,6 +60,7 @@
     }
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1",
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1"
   },
