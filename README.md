@@ -14,6 +14,15 @@ You should have received a copy of the GNU General Public License along with thi
 
 ## Building on Windows
 
+### Install on Windows
+
+If you just want the app, download the latest Windows release and run either:
+
+- `Maru-Desktop-0.0.6-x64.exe`
+- `Maru-Desktop-Setup-0.0.6-x64.msi`
+
+You do not need to build the project yourself for that path.
+
 ### Prerequisites
 
 - Windows 10/11
