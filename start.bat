@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-Start "" "npx" electron .
+Start "" cmd /k npm run tauri:dev

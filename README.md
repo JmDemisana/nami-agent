@@ -1,6 +1,6 @@
 # Maru Desktop
 
-Offline desktop shell for Maru applets. Built with Tauri.
+Desktop shell for Maru applets. Built with Tauri.
 
 ## License
 
@@ -18,8 +18,8 @@ You should have received a copy of the GNU General Public License along with thi
 
 If you just want the app, download the latest Windows release and run either:
 
-- `Maru-Desktop-0.0.6-x64.exe`
-- `Maru-Desktop-Setup-0.0.6-x64.msi`
+- `Maru-Desktop_0.0.7_x64-setup.exe`
+- `Maru-Desktop_0.0.7_x64_en-US.msi`
 
 You do not need to build the project yourself for that path.
 
@@ -58,7 +58,7 @@ cp -r desktop-web-dist/ C:\path\to\maru-desktop\
 npm run tauri -- build --bundles msi
 ```
 
-This creates a Windows installer in `src-tauri/target/release/bundle/msi/`.
+This creates Windows release bundles in `src-tauri/target/release/bundle/`.
 
 ## Building on Linux
 
@@ -144,6 +144,7 @@ This creates a macOS bundle in `src-tauri/target/release/bundle/dmg/`.
 
 ## Notes
 
-- The desktop app runs the offline web applets in a native Tauri shell
-- No internet required after initial setup
-- Uses local storage for settings
+- The desktop app runs the shared web applets inside a native Tauri shell.
+- Files, Files Database, Elevation, and shared account sync still need the Maru backend online.
+- The File Explorer structure mirror is aimed at Windows first. macOS and Linux still need manual integration testing.
+- Shared desktop auth state is stored locally in the app data folder, not in the repo.

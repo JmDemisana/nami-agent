@@ -511,11 +511,11 @@
         <section class="desktop-home" id="desktop-home">
           <div class="desktop-home-copy">
             <h1>Applets</h1>
-            <p>Local tools, no internet needed.</p>
+            <p>Desktop applets with native shell extras where they actually help.</p>
           </div>
           <div class="offline-banner">
-            <strong>Offline only</strong>
-            <span>Online features can come later.</span>
+            <strong>Mixed desktop mode</strong>
+            <span>Some applets stay local. Files, Elevation, and shared account features still talk to the Maru backend when needed.</span>
           </div>
           <div class="desktop-applet-list" id="desktop-applet-list"></div>
         </section>
@@ -531,6 +531,8 @@
       </div>
     </div>
     <script>
+      const RENDER_BACKEND_ORIGIN = "https://maru-website.onrender.com";
+
       const DESKTOP_APPLETS = [
         {
           id: "photo-serve",
@@ -570,9 +572,154 @@
           route: "/desktop-shell.html?applet=schededit",
           kicker: "Planner",
           icon: "/icons/applet-schededit.svg",
-          description: "Plan your week locally.",
+          description: "Plan your week with shared desktop account sync.",
+        },
+        {
+          id: "files",
+          name: "Files",
+          route: "/desktop-shell.html?applet=files",
+          kicker: "Storage",
+          icon: "/icons/applet-files.svg",
+          description: "Browse shared folders, drag files out, and open the Explorer mirror.",
+        },
+        {
+          id: "files-database",
+          name: "Files Database",
+          route: "/desktop-shell.html?applet=files-database",
+          kicker: "Admin",
+          icon: "/icons/applet-files.svg",
+          description: "Upload and manage the remote Files database from desktop.",
+        },
+        {
+          id: "elevation",
+          name: "Elevation",
+          route: "/desktop-shell.html?applet=elevation",
+          kicker: "Access",
+          icon: "/icons/mouse.png",
+          description: "Unlock elevated desktop actions before uploads and deletes.",
+        },
+        {
+          id: "options",
+          name: "Options",
+          route: "/desktop-shell.html?applet=options",
+          kicker: "Settings",
+          icon: "/icons/mouse.png",
+          description: "Themes, desktop behavior, and account-aware applet settings.",
         },
       ];
+
+      const tauriInvoke = window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core);
+      const secureAuthCache = {
+        sharedAuthUser: null,
+        elevationToken: null,
+      };
+      const desktopEnvironmentPromise =
+        typeof tauriInvoke === "function"
+          ? tauriInvoke("get_environment").catch(() => ({
+              isDesktopApp: true,
+              isWindows: false,
+              platform: "unknown",
+              version: "0.0.0",
+            }))
+          : Promise.resolve({
+              isDesktopApp: true,
+              isWindows: false,
+              platform: "unknown",
+              version: "0.0.0",
+            });
+
+      async function hydrateSecureAuthCache() {
+        if (typeof tauriInvoke !== "function") {
+          return;
+        }
+
+        try {
+          const store = await tauriInvoke("get_secure_auth");
+          secureAuthCache.sharedAuthUser =
+            typeof store?.sharedAuthUser === "string" ? store.sharedAuthUser : null;
+          secureAuthCache.elevationToken =
+            typeof store?.elevationToken === "string" ? store.elevationToken : null;
+        } catch (error) {
+          console.warn("[maru-desktop-tauri] secure auth hydrate failed", error);
+        }
+      }
+
+      const secureAuthHydrationPromise = hydrateSecureAuthCache();
+
+      function setSharedAuthUser(rawAuthUser) {
+        secureAuthCache.sharedAuthUser =
+          typeof rawAuthUser === "string" && rawAuthUser.trim() ? rawAuthUser : null;
+
+        if (typeof tauriInvoke === "function") {
+          void tauriInvoke("set_shared_auth_user", {
+            payload: {
+              rawAuthUser: secureAuthCache.sharedAuthUser,
+            },
+          }).catch((error) => {
+            console.warn("[maru-desktop-tauri] set_shared_auth_user failed", error);
+          });
+        }
+      }
+
+      function setElevationToken(token) {
+        secureAuthCache.elevationToken =
+          typeof token === "string" && token.trim() ? token.trim() : null;
+
+        if (typeof tauriInvoke === "function") {
+          void tauriInvoke("set_elevation_token", {
+            payload: {
+              token: secureAuthCache.elevationToken,
+            },
+          }).catch((error) => {
+            console.warn("[maru-desktop-tauri] set_elevation_token failed", error);
+          });
+        }
+      }
+
+      window.maruDesktop = {
+        getEnvironment: () => desktopEnvironmentPromise,
+        updater: {
+          check: () => Promise.resolve({ ok: false }),
+          download: () => Promise.resolve({ ok: false }),
+          isSupported: () => Promise.resolve(false),
+          onStatus: () => {},
+        },
+        files: {
+          prepareDragDownload: (payload) =>
+            typeof tauriInvoke === "function"
+              ? tauriInvoke("prepare_drag_download", { payload })
+              : Promise.resolve({
+                  ok: false,
+                  error: "The Tauri desktop bridge is unavailable.",
+                }),
+          openInExplorer: (targetPath) =>
+            typeof tauriInvoke === "function"
+              ? tauriInvoke("open_files_in_explorer", {
+                  payload: { targetPath },
+                })
+              : Promise.resolve({
+                  ok: false,
+                  message: "The Tauri desktop bridge is unavailable.",
+                }),
+          openStructureMirror: (payload) =>
+            typeof tauriInvoke === "function"
+              ? tauriInvoke("open_files_structure_mirror", { payload })
+              : Promise.resolve({
+                  ok: false,
+                  message: "The Tauri desktop bridge is unavailable.",
+                }),
+        },
+      };
+
+      window.AppletNativeBridge = {
+        getSharedAuthUser: () => secureAuthCache.sharedAuthUser,
+        getServerOrigin: () => RENDER_BACKEND_ORIGIN,
+        setSharedAuthUser,
+        clearSharedAuthUser: () => setSharedAuthUser(null),
+        getElevationToken: () => secureAuthCache.elevationToken,
+        setElevationToken,
+        clearElevationToken: () => setElevationToken(null),
+      };
 
       const appletList = document.getElementById("desktop-applet-list");
       const frame = document.getElementById("desktop-frame");
@@ -647,17 +794,19 @@
           subtitle.textContent = "Applets";
         }
         if (statusPill) {
-          statusPill.textContent = "Offline";
+          statusPill.textContent = "Desktop";
         }
         if (frame) {
           frame.src = "about:blank";
         }
       }
 
-      function openApplet(card) {
+      async function openApplet(card) {
         if (!card || !frame) {
           return;
         }
+
+        await secureAuthHydrationPromise;
 
         activeAppletId = card.dataset.appletId || null;
         setActiveCard(card);
@@ -673,7 +822,7 @@
           subtitle.textContent = card.querySelector(".desktop-applet-kicker")?.textContent || "Applet";
         }
         if (statusPill) {
-          statusPill.textContent = "Offline";
+          statusPill.textContent = "Desktop";
         }
         frame.src = card.dataset.route || "/desktop-shell.html";
       }

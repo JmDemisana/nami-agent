@@ -1,72 +1,18 @@
 {
   "name": "maru-desktop",
-  "version": "0.0.6",
-  "description": "Maru Desktop - Offline applet shell",
+  "version": "0.0.7",
+  "description": "Maru Desktop - Tauri applet shell",
   "author": "Maru <maru@example.com>",
   "license": "GPL-3.0",
   "type": "module",
-  "main": "electron/main.mjs",
   "scripts": {
-    "start": "electron .",
-    "start:tauri": "npm run tauri:dev",
-    "build": "echo 'Web assets built in main repo, copy desktop-web-dist/ here first'",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "start": "tauri dev",
+    "build": "node ./scripts/prepare-tauri-frontend.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
-  "build": {
-    "appId": "io.maru.desktop",
-    "productName": "Maru Desktop",
-    "artifactName": "Maru-Desktop-${os}-${arch}.${ext}",
-    "npmRebuild": false,
-    "publish": {
-      "provider": "github",
-      "owner": "JmDemisana",
-      "repo": "maru-desktop"
-    },
-    "files": [
-      "desktop-web-dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "public",
-      "output": "desktop-dist"
-    },
-    "win": {
-      "icon": "public/app-icon.png",
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "ia32"
-          ]
-        },
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "linux": {
-      "icon": "public/app-icon.png",
-      "target": [
-        "deb"
-      ]
-    }
-  },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.1",
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.3",
-    "multicast-dns": "^7.2.5",
-    "qrcode": "^1.5.4"
+    "@tauri-apps/cli": "^2.11.1"
   }
 }
