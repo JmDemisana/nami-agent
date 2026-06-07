@@ -74,6 +74,7 @@ struct DragDownloadSession {
 struct SecureStoreData {
     elevation_token: Option<String>,
     shared_auth_user: Option<String>,
+    nami_agent_gemini_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -701,6 +702,736 @@ fn open_files_structure_mirror(
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentMessage {
+    role: String,
+    parts: Vec<NamiAgentPart>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentPart {
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inline_data: Option<NamiAgentInlineData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function_call: Option<NamiAgentFunctionCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function_response: Option<NamiAgentFunctionResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentInlineData {
+    mime_type: String,
+    data: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentFunctionCall {
+    name: String,
+    args: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentFunctionResponse {
+    name: String,
+    response: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentChatRequest {
+    messages: Vec<NamiAgentMessage>,
+    system_prompt: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentChatResponse {
+    text: Option<String>,
+    function_call: Option<NamiAgentFunctionCall>,
+    done: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentFileOpResult {
+    ok: bool,
+    content: Option<String>,
+    entries: Option<Vec<String>>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamiAgentCommandResult {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn nami_agent_get_cwd() -> String {
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string())
+}
+
+#[tauri::command]
+async fn nami_agent_run_command(command: String, cwd: Option<String>) -> NamiAgentCommandResult {
+    let timeout_secs = 30u64;
+
+    let cmd_clone = command.clone();
+    let cwd_clone = cwd.clone();
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.args(["-NoProfile", "-Command", &cmd_clone]);
+            if let Some(ref dir) = cwd_clone {
+                if !dir.trim().is_empty() {
+                    cmd.current_dir(dir);
+                }
+            }
+            cmd.output()
+        }),
+    )
+    .await;
+
+    match output {
+        Ok(block_result) => {
+            let spawn_result = match block_result {
+                Ok(r) => r,
+                Err(e) => {
+                    return NamiAgentCommandResult {
+                        ok: false,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        exit_code: -1,
+                        error: Some(format!("Spawn task failed: {e}")),
+                    };
+                }
+            };
+            match spawn_result {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    let exit_code = out.status.code().unwrap_or(-1);
+                    NamiAgentCommandResult {
+                        ok: out.status.success(),
+                        stdout,
+                        stderr,
+                        exit_code,
+                        error: if out.status.success() { None } else { Some("Command exited with non-zero status".to_string()) },
+                    }
+                }
+                Err(e) => NamiAgentCommandResult {
+                    ok: false,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: -1,
+                    error: Some(format!("Failed to execute command: {e}")),
+                },
+            }
+        }
+        Err(_) => NamiAgentCommandResult {
+            ok: false,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: -1,
+            error: Some(format!("Command timed out after {}s", timeout_secs)),
+        },
+    }
+}
+
+#[tauri::command]
+fn get_nami_agent_key(app: AppHandle) -> Result<Option<String>, String> {
+    let store = read_secure_store(&app)?;
+    Ok(store.nami_agent_gemini_key)
+}
+
+#[tauri::command]
+fn save_nami_agent_key(app: AppHandle, key: String) -> Result<(), String> {
+    update_secure_store(&app, |store| {
+        store.nami_agent_gemini_key = if key.trim().is_empty() {
+            None
+        } else {
+            Some(key.trim().to_string())
+        };
+    })?;
+    Ok(())
+}
+
+#[tauri::command]
+fn parse_api_keys(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .collect()
+}
+
+fn pick_key_start(count: usize) -> usize {
+    if count <= 1 {
+        return 0;
+    }
+    (now_millis() % count as u64) as usize
+}
+
+const GEMINI_MODELS: &[&str] = &["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-8b"];
+
+/// Parse "Please retry in 33.19s" from a Gemini 429 error body.
+fn parse_retry_after_secs(body: &serde_json::Value) -> Option<u64> {
+    let msg = body
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())?;
+    let marker = "Please retry in ";
+    let start = msg.find(marker)? + marker.len();
+    let rest = &msg[start..];
+    let end = rest.find('s')?;
+    rest[..end].trim().parse::<f64>().ok().map(|s| s.ceil() as u64)
+}
+
+async fn try_gemini_with_key(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    body: &serde_json::Value,
+) -> Result<(reqwest::StatusCode, serde_json::Value), String> {
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    );
+
+    let response = client
+        .post(&url)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("Gemini API request failed: {e}"))?;
+
+    let status = response.status();
+    let response_body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Gemini response: {e}"))?;
+
+    Ok((status, response_body))
+}
+
+#[tauri::command]
+async fn gemini_chat(
+    _app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    api_keys: String,
+    request: NamiAgentChatRequest,
+) -> Result<NamiAgentChatResponse, String> {
+    let keys = parse_api_keys(&api_keys);
+    if keys.is_empty() {
+        return Err("No valid Gemini API keys provided.".to_string());
+    }
+
+    let mut contents: Vec<serde_json::Value> = Vec::new();
+    for msg in &request.messages {
+        let mut parts = Vec::new();
+        for part in &msg.parts {
+            let mut part_obj = serde_json::Map::new();
+            if let Some(text) = &part.text {
+                part_obj.insert("text".into(), serde_json::Value::String(text.clone()));
+            }
+            if let Some(id) = &part.inline_data {
+                let mut id_obj = serde_json::Map::new();
+                id_obj.insert("mimeType".into(), serde_json::Value::String(id.mime_type.clone()));
+                id_obj.insert("data".into(), serde_json::Value::String(id.data.clone()));
+                part_obj.insert("inlineData".into(), serde_json::Value::Object(id_obj));
+            }
+            if let Some(fc) = &part.function_call {
+                let mut fc_obj = serde_json::Map::new();
+                fc_obj.insert("name".into(), serde_json::Value::String(fc.name.clone()));
+                fc_obj.insert("args".into(), fc.args.clone());
+                part_obj.insert("functionCall".into(), serde_json::Value::Object(fc_obj));
+            }
+            if let Some(fr) = &part.function_response {
+                let mut fr_obj = serde_json::Map::new();
+                fr_obj.insert("name".into(), serde_json::Value::String(fr.name.clone()));
+                fr_obj.insert("response".into(), fr.response.clone());
+                part_obj.insert("functionResponse".into(), serde_json::Value::Object(fr_obj));
+            }
+            parts.push(serde_json::Value::Object(part_obj));
+        }
+        let mut content = serde_json::Map::new();
+        let role = if msg.role == "function" {
+            "user".to_string()
+        } else {
+            msg.role.clone()
+        };
+        content.insert("role".into(), serde_json::Value::String(role));
+        content.insert("parts".into(), serde_json::Value::Array(parts));
+        contents.push(serde_json::Value::Object(content));
+    }
+
+    let system_instruction: serde_json::Value = serde_json::json!({
+        "parts": [{ "text": request.system_prompt }]
+    });
+
+    let tools = serde_json::json!([{
+        "functionDeclarations": [
+            {
+                "name": "read_file",
+                "description": "Read the contents of a file at the given path.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Absolute path to the file" }
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
+                "name": "write_file",
+                "description": "Write content to a file at the given path. Creates or overwrites.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Absolute path to the file" },
+                        "content": { "type": "string", "description": "File content to write" }
+                    },
+                    "required": ["path", "content"]
+                }
+            },
+            {
+                "name": "list_directory",
+                "description": "List files and directories in the given folder path.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Absolute path to the directory" }
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
+                "name": "web_search",
+                "description": "Search the web for current information, documentation, or anything you don't know. Use this whenever you need up-to-date info.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The search query" }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "run_command",
+                "description": "Execute a shell command. Use this to run dev servers, install packages, run tests, or any CLI operation. The command runs in a PowerShell shell.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "The shell command to execute (PowerShell syntax)" }
+                    },
+                    "required": ["command"]
+                }
+            }
+        ]
+    }]);
+
+    let body = serde_json::json!({
+        "system_instruction": system_instruction,
+        "contents": contents,
+        "tools": tools,
+        "tool_config": {
+            "function_calling_config": {
+                "mode": "AUTO"
+            }
+        },
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 8192
+        }
+    });
+
+    let key_start = pick_key_start(keys.len());
+
+    let mut log_lines: Vec<String> = Vec::new();
+    log_lines.push(format!("Trying {} key(s) across {} model(s)", keys.len(), GEMINI_MODELS.len()));
+
+    'model_loop: for &model in GEMINI_MODELS {
+        log_lines.push(format!("\n--- Model: {} ---", model));
+
+        // Try keys one at a time. On 429, wait and retry the SAME key.
+        // Only move to next key on 503/network errors (which don't burn quota).
+        // Cap at min(3, keys.len()) different keys tried per model to avoid wasting tokens.
+        let keys_to_try = keys.len().min(3);
+
+        for i in 0..keys_to_try {
+            let idx = (key_start + i) % keys.len();
+            log_lines.push(format!("  \u{2192} Key #{}: sending request...", idx + 1));
+
+            let (status, response_body) = match try_gemini_with_key(&state.client, &keys[idx], model, &body).await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Network error — try next key, these don't burn quota
+                    log_lines.push(format!("  \u{2717} Key #{}: network error \u{2014} {}", idx + 1, e));
+                    continue;
+                }
+            };
+
+            if status.is_success() {
+                log_lines.push(format!("  \u{2713} Key #{}: success on {}", idx + 1, model));
+                return parse_gemini_response(response_body);
+            }
+
+            let http_code = status.as_u16();
+            let err_msg = response_body
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error")
+                .to_string();
+
+            // 404 = whole model is gone, skip immediately without burning more keys
+            if http_code == 404 {
+                log_lines.push(format!("  \u{2717} Model {} not found (404) \u{2014} skipping", model));
+                continue 'model_loop;
+            }
+
+            // 503 = server overload, not a quota issue — try next key cheaply
+            if http_code == 503 {
+                log_lines.push(format!("  \u{2717} Key #{}: 503 server overload \u{2014} trying next key", idx + 1));
+                continue;
+            }
+
+            // 429 = rate limited — wait for THIS key's retry window, then retry same key.
+            // Do NOT try other keys; they'll likely be rate-limited too and waste tokens.
+            if http_code == 429 {
+                if let Some(wait_secs) = parse_retry_after_secs(&response_body) {
+                    if wait_secs <= 65 {
+                        log_lines.push(format!(
+                            "  \u{23f3} Key #{}: rate limited, waiting {}s then retrying same key...",
+                            idx + 1, wait_secs
+                        ));
+                        tokio::time::sleep(std::time::Duration::from_secs(wait_secs + 1)).await;
+
+                        match try_gemini_with_key(&state.client, &keys[idx], model, &body).await {
+                            Ok((s, b)) if s.is_success() => {
+                                log_lines.push(format!("  \u{2713} Key #{}: success after wait on {}", idx + 1, model));
+                                return parse_gemini_response(b);
+                            }
+                            Ok((s, b)) => {
+                                let e = b.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("still failing");
+                                log_lines.push(format!("  \u{2717} Key #{}: HTTP {} after wait \u{2014} {}", idx + 1, s.as_u16(), e));
+                            }
+                            Err(e) => {
+                                log_lines.push(format!("  \u{2717} Key #{}: network error after wait \u{2014} {}", idx + 1, e));
+                            }
+                        }
+                        // Retry failed — move to next model rather than burning more keys
+                        continue 'model_loop;
+                    }
+                }
+                // 429 with no parseable retry-after or retry > 65s — give up on this model
+                log_lines.push(format!("  \u{2717} Key #{}: 429 with long/unknown retry \u{2014} skipping model", idx + 1));
+                continue 'model_loop;
+            }
+
+            // Any other error — try next key
+            log_lines.push(format!("  \u{2717} Key #{}: HTTP {} \u{2014} {}", idx + 1, http_code, err_msg));
+        }
+    }
+
+    let full_log = log_lines.join("\n");
+    eprintln!("[nami-agent]\n{}", full_log);
+
+    // Classify the failure so the frontend can show a human-friendly message
+    let any_rate_limit = full_log.contains("429") || full_log.contains("rate limit");
+    let any_overload   = full_log.contains("503");
+    let any_not_found  = full_log.contains("404");
+
+    let friendly = if any_rate_limit {
+        "⏳ All keys hit their rate limit. Try again in a little while!"
+    } else if any_overload {
+        "🔌 Gemini servers are overloaded right now. Try again in a moment."
+    } else if any_not_found {
+        "❌ No compatible Gemini models found for your API keys."
+    } else {
+        "❌ Couldn't reach the Gemini API. Check your connection or API keys."
+    };
+
+    Err(format!("{}\n---VERBOSE---\n{}", friendly, full_log))
+}
+
+fn parse_gemini_response(response_body: serde_json::Value) -> Result<NamiAgentChatResponse, String> {
+    let candidate = response_body
+        .get("candidates")
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .ok_or_else(|| "No candidates returned from Gemini".to_string())?;
+
+    let finish_reason = candidate
+        .get("finishReason")
+        .and_then(|r| r.as_str())
+        .unwrap_or("");
+
+    let content = candidate
+        .get("content")
+        .ok_or_else(|| "No content in Gemini response".to_string())?;
+
+    let parts = content
+        .get("parts")
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "No parts in Gemini response".to_string())?;
+
+    let mut text_parts = Vec::new();
+    let mut function_call = None;
+
+    for part in parts {
+        if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
+            if !t.is_empty() {
+                text_parts.push(t.to_string());
+            }
+        }
+        if let Some(fc) = part.get("functionCall") {
+            let name = fc
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let args = fc.get("args").cloned().unwrap_or(serde_json::Value::Null);
+            function_call = Some(NamiAgentFunctionCall { name, args });
+        }
+    }
+
+    let text = if text_parts.is_empty() {
+        None
+    } else {
+        Some(text_parts.join("\n"))
+    };
+
+    let has_no_fc = function_call.is_none();
+    Ok(NamiAgentChatResponse {
+        text,
+        function_call,
+        done: finish_reason == "STOP" && has_no_fc,
+    })
+}
+
+#[tauri::command]
+fn nami_agent_read_file(path: String) -> NamiAgentFileOpResult {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("File not found".to_string()),
+        };
+    }
+    if p.is_dir() {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("Path is a directory, not a file".to_string()),
+        };
+    }
+    match std::fs::read_to_string(p) {
+        Ok(content) => NamiAgentFileOpResult {
+            ok: true,
+            content: Some(content),
+            entries: None,
+            error: None,
+        },
+        Err(e) => NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some(format!("Could not read file: {e}")),
+        },
+    }
+}
+
+#[tauri::command]
+fn nami_agent_write_file(path: String, content: String) -> NamiAgentFileOpResult {
+    let p = std::path::Path::new(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                return NamiAgentFileOpResult {
+                    ok: false,
+                    content: None,
+                    entries: None,
+                    error: Some(format!("Could not create parent directory: {e}")),
+                };
+            }
+        }
+    }
+    match std::fs::write(p, &content) {
+        Ok(()) => NamiAgentFileOpResult {
+            ok: true,
+            content: None,
+            entries: None,
+            error: None,
+        },
+        Err(e) => NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some(format!("Could not write file: {e}")),
+        },
+    }
+}
+
+#[tauri::command]
+fn nami_agent_list_directory(path: String) -> NamiAgentFileOpResult {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("Directory not found".to_string()),
+        };
+    }
+    if !p.is_dir() {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("Path is not a directory".to_string()),
+        };
+    }
+    match std::fs::read_dir(p) {
+        Ok(entries) => {
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        format!("{name}/")
+                    } else {
+                        name
+                    }
+                })
+                .collect();
+            names.sort();
+            NamiAgentFileOpResult {
+                ok: true,
+                content: None,
+                entries: Some(names),
+                error: None,
+            }
+        }
+        Err(e) => NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some(format!("Could not read directory: {e}")),
+        },
+    }
+}
+
+#[tauri::command]
+async fn nami_agent_web_search(
+    state: State<'_, DesktopRuntimeState>,
+    api_keys: String,
+    query: String,
+) -> Result<String, String> {
+    // Try Tavily first (most reliable)
+    if let Ok(tavily_key) = std::env::var("TAVILY_API_KEY") {
+        if !tavily_key.is_empty() {
+            let tavily_body = serde_json::json!({
+                "api_key": tavily_key,
+                "query": query,
+                "max_results": 5
+            });
+            let resp = state
+                .client
+                .post("https://api.tavily.com/search")
+                .json(&tavily_body)
+                .send()
+                .await
+                .map_err(|e| format!("Tavily request failed: {e}"))?;
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(results) = data["results"].as_array() {
+                        if !results.is_empty() {
+                            let mut lines = Vec::new();
+                            for (i, r) in results.iter().enumerate() {
+                                let title = r["title"].as_str().unwrap_or("");
+                                let url = r["url"].as_str().unwrap_or("");
+                                let snippet = r["content"].as_str().unwrap_or("");
+                                lines.push(format!(
+                                    "{}. {} — {}\n   {}",
+                                    i + 1,
+                                    title,
+                                    url,
+                                    snippet
+                                ));
+                            }
+                            return Ok(lines.join("\n\n"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: use Gemini to answer the query directly (knowledge fallback)
+    let keys = parse_api_keys(&api_keys);
+    if keys.is_empty() {
+        return Err("No API keys available for search fallback.".to_string());
+    }
+
+    let search_body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": format!("Provide a concise answer for: {}. Include any relevant details or URLs if known.", query)}]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 500
+        }
+    });
+
+    let key_start = pick_key_start(keys.len());
+    let models = &["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+
+    for &model in models {
+        for i in 0..keys.len() {
+            let idx = (key_start + i) % keys.len();
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, keys[idx]
+            );
+            if let Ok(resp) = state.client.post(&url).json(&search_body).send().await {
+                if resp.status().is_success() {
+                    if let Ok(data) = resp.json::<serde_json::Value>().await {
+                        if let Some(text) = data["candidates"]
+                            .as_array()
+                            .and_then(|c| c.first())
+                            .and_then(|c| c["content"]["parts"].as_array())
+                            .and_then(|p| p.first())
+                            .and_then(|p| p["text"].as_str())
+                        {
+                            if !text.is_empty() {
+                                return Ok(format!("[Web search results for: {}]\n\n{}", query, text));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err("Web search: all keys and fallback models exhausted.".to_string())
+}
+
 fn main() {
     let runtime_state = DesktopRuntimeState::new();
     let server_state = runtime_state.clone();
@@ -716,7 +1447,16 @@ fn main() {
             clear_shared_auth_user,
             prepare_drag_download,
             open_files_in_explorer,
-            open_files_structure_mirror
+            open_files_structure_mirror,
+            get_nami_agent_key,
+            save_nami_agent_key,
+            gemini_chat,
+            nami_agent_read_file,
+            nami_agent_write_file,
+            nami_agent_list_directory,
+            nami_agent_web_search,
+            nami_agent_run_command,
+            nami_agent_get_cwd
         ])
         .setup(move |app| {
             if let Err(error) = tauri::async_runtime::block_on(async {
