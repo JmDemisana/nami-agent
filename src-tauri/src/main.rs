@@ -34,6 +34,7 @@ struct DesktopRuntimeState {
     client: Client,
     drag_sessions: Arc<Mutex<HashMap<String, DragDownloadSession>>>,
     drag_server_origin: Arc<Mutex<Option<String>>>,
+    gemini_key_index: Arc<Mutex<usize>>,
 }
 
 impl DesktopRuntimeState {
@@ -42,6 +43,7 @@ impl DesktopRuntimeState {
             client: Client::new(),
             drag_sessions: Arc::new(Mutex::new(HashMap::new())),
             drag_server_origin: Arc::new(Mutex::new(None)),
+            gemini_key_index: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -747,6 +749,9 @@ struct NamiAgentFunctionResponse {
 struct NamiAgentChatRequest {
     messages: Vec<NamiAgentMessage>,
     system_prompt: String,
+    model: Option<String>,
+    max_output_tokens: Option<u32>,
+    thinking_budget: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -876,14 +881,24 @@ fn parse_api_keys(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn pick_key_start(count: usize) -> usize {
-    if count <= 1 {
-        return 0;
-    }
-    (now_millis() % count as u64) as usize
+const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash-lite";
+const ALLOWED_GEMINI_MODELS: &[&str] = &["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+
+fn select_gemini_model(requested_model: Option<&str>) -> &'static str {
+    requested_model
+        .and_then(|model| {
+            let trimmed = model.trim();
+            ALLOWED_GEMINI_MODELS
+                .iter()
+                .copied()
+                .find(|allowed| *allowed == trimmed)
+        })
+        .unwrap_or(DEFAULT_GEMINI_MODEL)
 }
 
-const GEMINI_MODELS: &[&str] = &["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-8b"];
+fn clamp_max_output_tokens(value: Option<u32>) -> u32 {
+    value.unwrap_or(1536).clamp(256, 4096)
+}
 
 /// Parse "Please retry in 33.19s" from a Gemini 429 error body.
 fn parse_retry_after_secs(body: &serde_json::Value) -> Option<u64> {
@@ -1029,7 +1044,7 @@ async fn gemini_chat(
             },
             {
                 "name": "run_command",
-                "description": "Execute a shell command. Use this to run dev servers, install packages, run tests, or any CLI operation. The command runs in a PowerShell shell.",
+                "description": "Execute a PowerShell command on the user's Windows machine. Use this before asking for local facts, standard folder paths, OS info, file counts, dev servers, packages, tests, builds, git, or CLI tasks. Discover Desktop with [Environment]::GetFolderPath('Desktop'), home with $HOME, Documents with [Environment]::GetFolderPath('MyDocuments'), and Downloads with Join-Path $HOME 'Downloads'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1041,6 +1056,10 @@ async fn gemini_chat(
         ]
     }]);
 
+    let model = select_gemini_model(request.model.as_deref());
+    let max_output_tokens = clamp_max_output_tokens(request.max_output_tokens);
+    let thinking_budget = request.thinking_budget.unwrap_or(0).clamp(0, 24576);
+
     let body = serde_json::json!({
         "system_instruction": system_instruction,
         "contents": contents,
@@ -1051,119 +1070,111 @@ async fn gemini_chat(
             }
         },
         "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 8192
+            "temperature": 0.2,
+            "maxOutputTokens": max_output_tokens,
+            "thinkingConfig": {
+                "thinkingBudget": thinking_budget
+            }
         }
     });
 
-    let key_start = pick_key_start(keys.len());
+    // Strategy: avoid model fallback. It costs requests and can hit the same free-tier bucket.
+    // Rotate keys for ordinary errors, but on 429 wait/retry instead of burning more calls.
+
+    let start_idx = {
+        let mut guard = state.gemini_key_index.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let idx = *guard % keys.len();
+        *guard = (*guard + 1) % keys.len();
+        idx
+    };
 
     let mut log_lines: Vec<String> = Vec::new();
-    log_lines.push(format!("Trying {} key(s) across {} model(s)", keys.len(), GEMINI_MODELS.len()));
+    log_lines.push(format!(
+        "Key #{} on {} ({} total keys, maxOutputTokens {}, thinkingBudget {})",
+        start_idx + 1,
+        model,
+        keys.len(),
+        max_output_tokens,
+        thinking_budget
+    ));
 
-    'model_loop: for &model in GEMINI_MODELS {
-        log_lines.push(format!("\n--- Model: {} ---", model));
+    let mut rate_limit_wait: Option<u64> = None;
 
-        // Try keys one at a time. On 429, wait and retry the SAME key.
-        // Only move to next key on 503/network errors (which don't burn quota).
-        // Cap at min(3, keys.len()) different keys tried per model to avoid wasting tokens.
-        let keys_to_try = keys.len().min(3);
+    for offset in 0..keys.len().min(2) {
+        let key_idx = (start_idx + offset) % keys.len();
 
-        for i in 0..keys_to_try {
-            let idx = (key_start + i) % keys.len();
-            log_lines.push(format!("  \u{2192} Key #{}: sending request...", idx + 1));
+        log_lines.push(format!("  \u{2192} trying key #{}...", key_idx + 1));
 
-            let (status, response_body) = match try_gemini_with_key(&state.client, &keys[idx], model, &body).await {
-                Ok(pair) => pair,
-                Err(e) => {
-                    // Network error — try next key, these don't burn quota
-                    log_lines.push(format!("  \u{2717} Key #{}: network error \u{2014} {}", idx + 1, e));
-                    continue;
-                }
-            };
-
-            if status.is_success() {
-                log_lines.push(format!("  \u{2713} Key #{}: success on {}", idx + 1, model));
-                return parse_gemini_response(response_body);
-            }
-
-            let http_code = status.as_u16();
-            let err_msg = response_body
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error")
-                .to_string();
-
-            // 404 = whole model is gone, skip immediately without burning more keys
-            if http_code == 404 {
-                log_lines.push(format!("  \u{2717} Model {} not found (404) \u{2014} skipping", model));
-                continue 'model_loop;
-            }
-
-            // 503 = server overload, not a quota issue — try next key cheaply
-            if http_code == 503 {
-                log_lines.push(format!("  \u{2717} Key #{}: 503 server overload \u{2014} trying next key", idx + 1));
+        let (status, response_body) = match try_gemini_with_key(&state.client, &keys[key_idx], model, &body).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                log_lines.push(format!("  \u{2717} key #{}: network error \u{2014} {}", key_idx + 1, e));
                 continue;
             }
+        };
 
-            // 429 = rate limited — wait for THIS key's retry window, then retry same key.
-            // Do NOT try other keys; they'll likely be rate-limited too and waste tokens.
-            if http_code == 429 {
-                if let Some(wait_secs) = parse_retry_after_secs(&response_body) {
-                    if wait_secs <= 65 {
-                        log_lines.push(format!(
-                            "  \u{23f3} Key #{}: rate limited, waiting {}s then retrying same key...",
-                            idx + 1, wait_secs
-                        ));
-                        tokio::time::sleep(std::time::Duration::from_secs(wait_secs + 1)).await;
+        if status.is_success() {
+            return parse_gemini_response(response_body);
+        }
 
-                        match try_gemini_with_key(&state.client, &keys[idx], model, &body).await {
-                            Ok((s, b)) if s.is_success() => {
-                                log_lines.push(format!("  \u{2713} Key #{}: success after wait on {}", idx + 1, model));
-                                return parse_gemini_response(b);
-                            }
-                            Ok((s, b)) => {
-                                let e = b.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("still failing");
-                                log_lines.push(format!("  \u{2717} Key #{}: HTTP {} after wait \u{2014} {}", idx + 1, s.as_u16(), e));
-                            }
-                            Err(e) => {
-                                log_lines.push(format!("  \u{2717} Key #{}: network error after wait \u{2014} {}", idx + 1, e));
+        let http_code = status.as_u16();
+        let err_msg = response_body
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error")
+            .to_string();
+
+        if http_code == 429 {
+            let wait_secs = parse_retry_after_secs(&response_body).unwrap_or(30);
+            rate_limit_wait = Some(rate_limit_wait.map(|w| w.min(wait_secs)).unwrap_or(wait_secs));
+
+            // Quick blip (≤5s): wait and retry same key once
+            if wait_secs <= 5 {
+                log_lines.push(format!("  \u{23f3} key #{}: short 429 ({}s), retrying...", key_idx + 1, wait_secs));
+                tokio::time::sleep(std::time::Duration::from_secs(wait_secs + 1)).await;
+
+                match try_gemini_with_key(&state.client, &keys[key_idx], model, &body).await {
+                    Ok((s, b)) if s.is_success() => {
+                        return parse_gemini_response(b);
+                    }
+                    Ok((s, b)) => {
+                        let e = b.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("still failing");
+                        log_lines.push(format!("  \u{2717} key #{}: HTTP {} after wait \u{2014} {}", key_idx + 1, s.as_u16(), e));
+                        if s.as_u16() == 429 {
+                            if let Some(new_wait) = parse_retry_after_secs(&b) {
+                                rate_limit_wait = Some(rate_limit_wait.map(|w| w.min(new_wait)).unwrap_or(new_wait));
                             }
                         }
-                        // Retry failed — move to next model rather than burning more keys
-                        continue 'model_loop;
+                    }
+                    Err(e) => {
+                        log_lines.push(format!("  \u{2717} key #{}: network error after wait \u{2014} {}", key_idx + 1, e));
                     }
                 }
-                // 429 with no parseable retry-after or retry > 65s — give up on this model
-                log_lines.push(format!("  \u{2717} Key #{}: 429 with long/unknown retry \u{2014} skipping model", idx + 1));
-                continue 'model_loop;
+            } else {
+                log_lines.push(format!("  \u{2717} key #{}: 429 ({}s) \u{2014} frontend will handle", key_idx + 1, wait_secs));
             }
-
-            // Any other error — try next key
-            log_lines.push(format!("  \u{2717} Key #{}: HTTP {} \u{2014} {}", idx + 1, http_code, err_msg));
+            break;
         }
+
+        // Non-429 errors: try one more key
+        log_lines.push(format!("  \u{2717} key #{}: HTTP {} \u{2014} {}", key_idx + 1, http_code, err_msg));
     }
 
     let full_log = log_lines.join("\n");
     eprintln!("[nami-agent]\n{}", full_log);
 
-    // Classify the failure so the frontend can show a human-friendly message
-    let any_rate_limit = full_log.contains("429") || full_log.contains("rate limit");
-    let any_overload   = full_log.contains("503");
-    let any_not_found  = full_log.contains("404");
-
-    let friendly = if any_rate_limit {
-        "⏳ All keys hit their rate limit. Try again in a little while!"
-    } else if any_overload {
-        "🔌 Gemini servers are overloaded right now. Try again in a moment."
-    } else if any_not_found {
-        "❌ No compatible Gemini models found for your API keys."
+    let retry_str = rate_limit_wait.map(|s| s.to_string()).unwrap_or_default();
+    let friendly = if rate_limit_wait.is_some() {
+        format!("⏳ Rate limited. Waiting {}s. Retrying automatically...", retry_str)
+    } else if full_log.contains("503") {
+        "🔌 Gemini servers are overloaded. Retrying...".to_string()
     } else {
-        "❌ Couldn't reach the Gemini API. Check your connection or API keys."
+        "❌ Gemini API error. Retrying...".to_string()
     };
 
-    Err(format!("{}\n---VERBOSE---\n{}", friendly, full_log))
+    // Return the error with a retryAfter hint so the frontend knows to auto-retry
+    Err(format!("RETRY_AFTER:{}\n{}\n---VERBOSE---\n{}", retry_str, friendly, full_log))
 }
 
 fn parse_gemini_response(response_body: serde_json::Value) -> Result<NamiAgentChatResponse, String> {
@@ -1399,29 +1410,35 @@ async fn nami_agent_web_search(
         }
     });
 
-    let key_start = pick_key_start(keys.len());
-    let models = &["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    // Try keys one at a time on the efficient default model, rotating start per request.
+    let model = DEFAULT_GEMINI_MODEL;
 
-    for &model in models {
-        for i in 0..keys.len() {
-            let idx = (key_start + i) % keys.len();
-            let url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                model, keys[idx]
-            );
-            if let Ok(resp) = state.client.post(&url).json(&search_body).send().await {
-                if resp.status().is_success() {
-                    if let Ok(data) = resp.json::<serde_json::Value>().await {
-                        if let Some(text) = data["candidates"]
-                            .as_array()
-                            .and_then(|c| c.first())
-                            .and_then(|c| c["content"]["parts"].as_array())
-                            .and_then(|p| p.first())
-                            .and_then(|p| p["text"].as_str())
-                        {
-                            if !text.is_empty() {
-                                return Ok(format!("[Web search results for: {}]\n\n{}", query, text));
-                            }
+    let start_idx = {
+        let mut guard = state.gemini_key_index.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let idx = *guard % keys.len();
+        *guard = (*guard + 1) % keys.len();
+        idx
+    };
+
+    for offset in 0..keys.len() {
+        let key_idx = (start_idx + offset) % keys.len();
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, keys[key_idx]
+        );
+        if let Ok(resp) = state.client.post(&url).json(&search_body).send().await {
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(text) = data["candidates"]
+                        .as_array()
+                        .and_then(|c| c.first())
+                        .and_then(|c| c["content"]["parts"].as_array())
+                        .and_then(|p| p.first())
+                        .and_then(|p| p["text"].as_str())
+                    {
+                        if !text.is_empty() {
+                            return Ok(format!("[Web search results for: {}]\n\n{}", query, text));
                         }
                     }
                 }
@@ -1429,7 +1446,7 @@ async fn nami_agent_web_search(
         }
     }
 
-    Err("Web search: all keys and fallback models exhausted.".to_string())
+    Err("Web search: all keys exhausted.".to_string())
 }
 
 fn main() {

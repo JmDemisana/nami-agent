@@ -83,15 +83,65 @@ interface FileSuggestion {
 
 const invoke = window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core);
 
+const MODEL_OPTIONS = [
+  {
+    id: "gemini-2.5-flash-lite",
+    label: "Lite",
+    note: "15 RPM / 1k RPD",
+    maxOutputTokens: 1536,
+    thinkingBudget: 0,
+  },
+  {
+    id: "gemini-2.5-flash",
+    label: "Flash",
+    note: "10 RPM / 250 RPD",
+    maxOutputTokens: 2048,
+    thinkingBudget: 0,
+  },
+];
+
+const MAX_HISTORY_MESSAGES = 14;
+const MAX_PROMPT_TEXT_CHARS = 2500;
+const MAX_TOOL_RESULT_CHARS = 3500;
+const MAX_VISIBLE_TOOL_RESULT_CHARS = 2200;
+
+function clampText(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return value.slice(0, maxChars) + "\n...[trimmed for token efficiency]";
+}
+
+function formatCommandResult(result: {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  error: string | null;
+}) {
+  const sections = [`exitCode: ${result.exitCode}`];
+  if (result.stdout.trim()) sections.push(`stdout:\n${result.stdout.trim()}`);
+  if (result.stderr.trim()) sections.push(`stderr:\n${result.stderr.trim()}`);
+  if (result.error) sections.push(`error: ${result.error}`);
+  return sections.join("\n\n");
+}
+
+function summarizeToolFallback(name: string, result: string) {
+  const compact = clampText(result, 1200);
+  if (name === "run_command") {
+    return `I got the command result, but Gemini returned an empty final turn. Here's the useful part, Senpai:\n\n${compact}`;
+  }
+  return `I got the ${name} result, but Gemini returned an empty final turn. Here's what came back:\n\n${compact}`;
+}
+
 async function callGeminiChat(
   apiKeys: string,
   messages: Array<{ role: string; parts: Array<{ text?: string }> }>,
   systemPrompt: string,
+  options: { model: string; maxOutputTokens: number; thinkingBudget: number },
 ) {
   if (!invoke) throw new Error("Tauri bridge not available");
   return invoke("gemini_chat", {
     apiKeys,
-    request: { messages, systemPrompt },
+    request: { messages, systemPrompt, ...options },
   }) as Promise<{
     text: string | null;
     functionCall: { name: string; args: Record<string, string> } | null;
@@ -285,7 +335,12 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  const [rateLimitStatus, setRateLimitStatus] = useState<{ waitSeconds: number; message: string } | null>(null);
   const cancelRef = useRef(false);
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try { return localStorage.getItem("nami-agent-model") || MODEL_OPTIONS[0].id; }
+    catch { return MODEL_OPTIONS[0].id; }
+  });
   const [projectRoot, setProjectRoot] = useState(() => { try { return localStorage.getItem("nami-agent-root") || ""; } catch { return ""; } });
   const [memoryPath, setMemoryPath] = useState(() => { try { return localStorage.getItem("nami-memory-path") || ""; } catch { return ""; } });
   const [agentsPath, setAgentsPath] = useState(() => { try { return localStorage.getItem("nami-agents-path") || ""; } catch { return ""; } });
@@ -306,6 +361,7 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   useEffect(() => { try { localStorage.setItem("nami-agent-font", fontFamily); } catch {} }, [fontFamily]);
   useEffect(() => { try { localStorage.setItem("nami-agent-fontsize", String(fontSizePx)); } catch {} }, [fontSizePx]);
   useEffect(() => { try { localStorage.setItem("nami-confirm-mode", confirmMode); } catch {} }, [confirmMode]);
+  useEffect(() => { try { localStorage.setItem("nami-agent-model", selectedModel); } catch {} }, [selectedModel]);
   useEffect(() => { try { localStorage.setItem("nami-agent-root", projectRoot); } catch {} }, [projectRoot]);
   useEffect(() => { try { localStorage.setItem("nami-memory-path", memoryPath); } catch {} }, [memoryPath]);
   useEffect(() => { try { localStorage.setItem("nami-agents-path", agentsPath); } catch {} }, [agentsPath]);
@@ -362,61 +418,34 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   const handleApply = (code: string) => { navigator.clipboard.writeText(code).catch(() => {}); };
   const getSystemPrompt = () => {
     const parts = [
-      "You are Nami (Nanami), a semi-agentic AI assistant running inside Maru Desktop — a Tauri desktop app on a real Windows machine.",
+      "You are Nami (Nanami), an AI assistant on a real Windows machine in Maru Desktop.",
       "",
-      "═══════════════════════════════════════",
-      "CRITICAL RULE: YOU ARE TOOL-FIRST",
-      "═══════════════════════════════════════",
-      "You have REAL function tools that execute on the user's actual computer. You MUST use them proactively.",
-      "",
-      "USE A TOOL BEFORE answering whenever the user asks about:",
-      "  • The system, OS, hardware, environment, running processes → run_command",
-      "  • File contents or directory listings → read_file or list_directory",
-      "  • Current info, libraries, APIs, documentation → web_search",
-      "  • Running code, npm, git, builds, installs, servers → run_command",
-      "  • Writing or editing files → write_file",
-      "",
-      "CONCRETE EXAMPLES — what you MUST do:",
-      "  'what OS am I on?' → call run_command('$env:OS; [System.Environment]::OSVersion.VersionString')",
-      "  'list my project files' → call list_directory(projectRoot)",
-      "  'latest React version?' → call web_search('React latest stable version')",
-      "  'read my package.json' → call read_file(path)",
-      "  'run npm install' → call run_command('npm install')",
-      "",
-      "FORBIDDEN responses — NEVER say any of these:",
-      "  ✗ 'I don't have access to your system'",
-      "  ✗ 'I can't check that'",
-      "  ✗ 'As an AI, I cannot...'",
-      "  ✗ Any simulated or guessed result a tool could give",
-      "",
-      "AGENTIC LOOP: Chain tool calls as needed. After each tool result, decide:",
-      "  → Do I have enough info to give a final answer? If no, call another tool.",
-      "  → Only write your final message once you have REAL data from tool results.",
-      "═══════════════════════════════════════",
-      "",
-      "Tools:",
-      "  run_command(command) — PowerShell on user's Windows PC. Use for: OS info, env vars, git, npm, builds, processes.",
-      "  read_file(path) — read a file's full content.",
-      "  write_file(path, content) — write/create a file.",
-      "  list_directory(path) — list entries in a folder.",
-      "  web_search(query) — live web search, returns a summary.",
-      "",
-      "Applet routing: emit [ROUTE:TAG] when user wants an applet.",
-      "Tags: CUP, TUP, DAEL, PHOTO, OPTIONS, AMG, WORDEL, SCHED, TIER, LRC.",
+      "TOOL RULE: You have real tools. Use them before guessing. Never simulate a tool result.",
+      "  run_command(command)    — PowerShell on the user's PC (OS info, git, npm, builds, processes)",
+      "  read_file(path)        — read any file",
+      "  write_file(path,content)— write/create a file",
+      "  list_directory(path)   — list a folder's contents",
+      "  web_search(query)      — live web search, returns summary",
+      "PowerShell note: do not use CMD-only builtins like ver. For OS info use: Get-ComputerInfo | Select-Object OsName, OsVersion",
+      "LOCAL PATH RULE: Never ask Senpai for standard folder paths. Discover them with tools.",
+      "  Desktop path: [Environment]::GetFolderPath('Desktop')",
+      "  Home path: $HOME",
+      "  Documents path: [Environment]::GetFolderPath('MyDocuments')",
+      "  Downloads path: Join-Path $HOME 'Downloads'",
+      "For counts, use PowerShell directly. Example: $d=[Environment]::GetFolderPath('Desktop'); (Get-ChildItem -LiteralPath $d -File -Filter '*.txt').Count",
+      "TOKEN RULE: Be concise. Ask for targeted files and focused commands. Do not paste full files or huge logs unless Senpai asks.",
+      "AGENT LOOP: Use one or two focused tool calls, inspect the result, then continue only if more evidence is needed.",
+      "Applet routing: [ROUTE:TAG] with tags CUP, TUP, DAEL, PHOTO, OPTIONS, AMG, WORDEL, SCHED, TIER, LRC.",
       "",
       "Memory:",
-      memoryContent || "(none configured)",
+      memoryContent ? clampText(memoryContent, 5000) : "(none configured)",
       "",
       "Agent instructions:",
-      agentsContent || "(none configured)",
+      agentsContent ? clampText(agentsContent, 5000) : "(none configured)",
     ];
     if (messengerCode) parts.push("", "Messenger sync code linked.");
-    if (projectContext) parts.push("", "Project context:", projectContext);
-    parts.push(
-      "",
-      "Personality: Warm, slightly tsundere, playful. Call the user Senpai. Use 1-2 emojis. Be concise.",
-      "IMPORTANT: Personality never overrides tool duty. Use tools first — then deliver the result with charm."
-    );
+    if (projectContext) parts.push("", "Project context:", clampText(projectContext, 1400));
+    parts.push("", "Personality: Warm, playful, call user Senpai. Be concise. Tools first, charm second.");
     return parts.join("\n");
   };
   const requestConfirmation = (name: string, args: Record<string, string>): Promise<boolean> => {
@@ -447,31 +476,73 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     cancelRef.current = false;
     setRunning(true);
     const capturedRoot = projectRoot;
+    const modelOption = MODEL_OPTIONS.find(option => option.id === selectedModel) || MODEL_OPTIONS[0];
     const currentHistory: Array<{ role: string; parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, string> }; functionResponse?: { name: string; response: { content: string } } }> }> = [];
-    for (const m of messages) {
+    const promptMessages = messages
+      .filter(m => !m.confirmId)
+      .slice(-MAX_HISTORY_MESSAGES);
+    for (const m of promptMessages) {
       if (m.role === "function") {
-        currentHistory.push({ role: "function", parts: [{ functionResponse: { name: m.name || "unknown", response: { content: m.text } } }] });
+        currentHistory.push({ role: "function", parts: [{ functionResponse: { name: m.name || "unknown", response: { content: clampText(m.text, MAX_TOOL_RESULT_CHARS) } } }] });
       } else if (m.role === "model" && m.functionCall) {
         const parts: any[] = [];
         if (m.text) {
-          parts.push({ text: m.text });
+          parts.push({ text: clampText(m.text, MAX_PROMPT_TEXT_CHARS) });
         }
         parts.push({ functionCall: { name: m.functionCall.name, args: m.functionCall.args } });
         currentHistory.push({ role: "model", parts });
       } else {
-        currentHistory.push({ role: m.role, parts: [{ text: m.text || "" }] });
+        currentHistory.push({ role: m.role, parts: [{ text: clampText(m.text || "", MAX_PROMPT_TEXT_CHARS) }] });
       }
     }
     currentHistory.push({ role: "user", parts: [{ text: userMsg }] });
     setMessages(prev => [...prev, { role: "user", text: userMsg }]);
     let done = false;
     let loopCount = 0;
-    const maxLoops = 15;
+    let rateLimitRetries = 0;
+    let lastToolName = "";
+    let lastToolResult = "";
+    const maxLoops = 6;
+    const MAX_RATE_LIMIT_RETRIES = 3;
     while (!done && !cancelRef.current && loopCount < maxLoops) {
       loopCount++;
       let result;
-      try { result = await callGeminiChat(key, currentHistory, getSystemPrompt()); }
-      catch (err) { setMessages(prev => [...prev, { role: "model", text: "Error: " + err }]); break; }
+      try {
+        result = await callGeminiChat(key, currentHistory, getSystemPrompt(), {
+          model: modelOption.id,
+          maxOutputTokens: modelOption.maxOutputTokens,
+          thinkingBudget: modelOption.thinkingBudget,
+        });
+      }
+      catch (err) {
+        const errStr = String(err);
+        const retryMatch = errStr.match(/^RETRY_AFTER:(\d+)/);
+        if (retryMatch) {
+          const wait = Math.min(parseInt(retryMatch[1]) || 30, 60);
+          rateLimitRetries++;
+          if (rateLimitRetries >= MAX_RATE_LIMIT_RETRIES) {
+            setMessages(prev => [...prev, { role: "model", text: "⏳ Rate limited after retrying. Try again later, Senpai~ 😅" }]);
+            break;
+          }
+          loopCount--;
+          for (let i = wait; i > 0; i--) {
+            setRateLimitStatus({ waitSeconds: i, message: `⏳ Rate limited \u2014 retrying in ${i}s` });
+            await new Promise(r => setTimeout(r, 1000));
+            if (cancelRef.current) break;
+          }
+          setRateLimitStatus(null);
+          if (cancelRef.current) break;
+          continue;
+        }
+        if (errStr.includes("No parts in Gemini response") || errStr.includes("No content in Gemini response")) {
+          if (lastToolResult) {
+            setMessages(prev => [...prev, { role: "model", text: summarizeToolFallback(lastToolName, lastToolResult) }]);
+            break;
+          }
+        }
+        setMessages(prev => [...prev, { role: "model", text: "Error: " + errStr }]);
+        break;
+      }
       
       if (result && result.functionCall) {
         const fc = result.functionCall;
@@ -528,13 +599,17 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
             case "write_file": { const r = await writeFile(fc.args.path, fc.args.content); funcResult = r.ok ? "File written." : ("Error: " + r.error); break; }
             case "list_directory": { const r = await listDirectory(fc.args.path); funcResult = r.ok ? ((r.entries || []).join("\n")) : ("Error: " + r.error); break; }
             case "web_search": { funcResult = await searchWeb(fc.args.query); break; }
-            case "run_command": { const r = await runShellCommand(fc.args.command, capturedRoot || undefined); funcResult = r.ok ? (r.stdout || "(no output)") : ("Error: " + (r.stderr || r.error || "unknown")); break; }
+            case "run_command": { const r = await runShellCommand(fc.args.command, capturedRoot || undefined); funcResult = formatCommandResult(r); break; }
             default: funcResult = "Unknown function: " + fc.name;
           }
         } catch (err) { funcResult = "Execution error: " + err; }
+        lastToolName = fc.name;
+        lastToolResult = funcResult;
         
-        setMessages(prev => [...prev, { role: "function", text: funcResult, name: fc.name }]);
-        currentHistory.push({ role: "function", parts: [{ functionResponse: { name: fc.name, response: { content: funcResult } } }] });
+        const displayResult = clampText(funcResult, MAX_VISIBLE_TOOL_RESULT_CHARS);
+        setMessages(prev => [...prev, { role: "function", text: displayResult, name: fc.name }]);
+        currentHistory.push({ role: "function", parts: [{ functionResponse: { name: fc.name, response: { content: clampText(funcResult, MAX_TOOL_RESULT_CHARS) } } }] });
+        await new Promise(r => setTimeout(r, 120));
       } else if (result && result.text != null) {
         const responseText = result.text ?? "";
         if (onRoute) { const m = responseText.match(/\[ROUTE:(\w+)\]/); if (m) onRoute(m[1]); }
@@ -545,6 +620,7 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     }
     if (loopCount >= maxLoops) { setMessages(prev => [...prev, { role: "model", text: "I have been thinking too long on this one. Let me know if you need anything else, Senpai~ 😅" }]); }
     setRunning(false);
+    setRateLimitStatus(null);
   };
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -566,6 +642,12 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           </div>
           <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
           <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
+          <span style={headerSep}>·</span>
+          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={selectStyle} title="Gemini model">
+            {MODEL_OPTIONS.map(option => (
+              <option key={option.id} value={option.id}>{option.label} · {option.note}</option>
+            ))}
+          </select>
           <span style={headerSep}>·</span>
           <select value={confirmMode} onChange={e => setConfirmMode(e.target.value as any)} style={selectStyle} title="Write & Command Confirmation Mode">
             <option value="confirm">🔒 Confirm</option>
@@ -592,13 +674,22 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         {messages.map((msg, i) => (
           <div key={i} style={agentEntry} className="nami-entry">
             <div style={agentEntryLabel}>
-              <EntryLabel role={msg.role} name={msg.name} />
-              {msg.role === "function" && msg.name && (
-                <span style={{ marginLeft: "0.5rem", fontSize: "0.78rem", opacity: 0.5, fontFamily: "monospace" }}>
-                  {msg.text.startsWith("Error") ? msg.text : msg.text.length > 80 ? msg.text.slice(0, 80) + "..." : msg.text}
-                </span>
-              )}
+              <EntryLabel role={msg.role} name={msg.name} args={msg.functionCall?.args} />
             </div>
+            {msg.role === "function" && (
+              <div style={{ paddingLeft: "0.2rem" }}>
+                <pre style={{ margin: "0.3rem 0 0", fontSize: "0.78rem", lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace", opacity: 0.75, maxHeight: 200, overflow: "auto", background: "rgba(0,0,0,0.2)", padding: "0.4rem 0.5rem", borderRadius: 6 }}>
+                  {msg.text.length > 2000 ? msg.text.slice(0, 2000) + "\n…[truncated]" : msg.text}
+                </pre>
+              </div>
+            )}
+            {msg.role === "model" && msg.functionCall && msg.functionCall.name === "run_command" && (
+              <div style={{ padding: "0.2rem 0.2rem 0 0.2rem" }}>
+                <pre style={{ margin: 0, fontSize: "0.75rem", lineHeight: 1.3, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace", opacity: 0.5, background: "rgba(0,0,0,0.15)", padding: "0.3rem 0.4rem", borderRadius: 4 }}>
+                  $ {msg.functionCall.args.command}
+                </pre>
+              </div>
+            )}
             {msg.role !== "function" && (
               <div style={agentEntryContent}>
                 {msg.confirmId ? (
@@ -630,7 +721,15 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
               <span style={{ color: "#b4e08e", fontWeight: 600, fontSize: "0.82rem" }}>🐱 nami</span>
             </div>
             <div style={agentEntryContent}>
-              <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" /> <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" /> <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />
+              {rateLimitStatus ? (
+                <span style={{ color: "#ffa726", fontSize: "0.85rem" }}>{rateLimitStatus.message}</span>
+              ) : (
+                <>
+                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />{" "}
+                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />{" "}
+                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />
+                </>
+              )}
             </div>
           </div>
         )}
@@ -708,10 +807,34 @@ function ConfirmBlock({
   );
 }
 
-function EntryLabel({ role, name }: { role: string; name?: string }) {
+function EntryLabel({ role, name, args }: { role: string; name?: string; args?: Record<string, string> }) {
   const label = role === "user" ? "\uD83E\uDDD1 Senpai" : role === "function" ? ("\u26A1 " + (name || "func")) : "\uD83D\uDC31 nami";
   const color = role === "user" ? "#b4e08e" : role === "function" ? "#f0c060" : "#78b0ff";
-  return <span style={{ color, fontWeight: 600, fontSize: "0.82rem" }}>{label}</span>;
+  return (
+    <span style={{ color, fontWeight: 600, fontSize: "0.82rem" }}>
+      {label}
+      {args && name === "run_command" && (
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65, color: "#e0e0e0" }}>
+          $ {args.command?.length > 80 ? args.command.slice(0, 80) + "…" : args.command}
+        </span>
+      )}
+      {args && name === "read_file" && (
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+          📄 {args.path}
+        </span>
+      )}
+      {args && name === "write_file" && (
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+          ✏️ {args.path}
+        </span>
+      )}
+      {args && name === "web_search" && (
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+          🔍 {args.query?.length > 60 ? args.query.slice(0, 60) + "…" : args.query}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function CodeBlock({ language, code, onApply }: { language: string; code: string; onApply?: (code: string) => void }) {
