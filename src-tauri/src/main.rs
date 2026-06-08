@@ -1044,7 +1044,7 @@ async fn gemini_chat(
             },
             {
                 "name": "run_command",
-                "description": "Execute a PowerShell command on the user's Windows machine. Use this before asking for local facts, standard folder paths, OS info, file counts, dev servers, packages, tests, builds, git, or CLI tasks. Discover Desktop with [Environment]::GetFolderPath('Desktop'), home with $HOME, Documents with [Environment]::GetFolderPath('MyDocuments'), and Downloads with Join-Path $HOME 'Downloads'.",
+                "description": "Execute a PowerShell command on the user's Windows machine. Use this before asking for local facts, standard folder paths, OS info, file counts, open windows, running apps, processes, dev servers, packages, tests, builds, git, or CLI tasks. Discover Desktop with [Environment]::GetFolderPath('Desktop'), home with $HOME, Documents with [Environment]::GetFolderPath('MyDocuments'), and Downloads with Join-Path $HOME 'Downloads'. Count open app windows with Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | Measure-Object | Select-Object -ExpandProperty Count. For exact visible top-level windows, use PowerShell Add-Type with user32.dll EnumWindows and count visible windows with non-empty titles.",
                 "parameters": {
                     "type": "object",
                     "properties": {
