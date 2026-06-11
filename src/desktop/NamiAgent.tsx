@@ -1,5 +1,22 @@
 import { useState, useRef, useEffect, type FormEvent, type CSSProperties } from "react";
 
+// Inject dot bounce keyframe once
+(function injectNamiStyles() {
+  if (document.getElementById("nami-agent-styles")) return;
+  const s = document.createElement("style");
+  s.id = "nami-agent-styles";
+  s.textContent = `
+    @keyframes namiDotBounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+      40% { transform: translateY(-4px); opacity: 1; }
+    }
+    .nami-dot { display: inline-block; }
+    .nami-entry { transition: background 0.15s; }
+    .nami-entry:hover { background: rgba(255,255,255,0.015); }
+  `;
+  document.head.appendChild(s);
+})();
+
 const GEMINI_FUNCTION_TOOLS = [
   {
     name: "read_file",
@@ -341,9 +358,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     try { return localStorage.getItem("nami-agent-model") || MODEL_OPTIONS[0].id; }
     catch { return MODEL_OPTIONS[0].id; }
   });
-  const [projectRoot, setProjectRoot] = useState(() => { try { return localStorage.getItem("nami-agent-root") || ""; } catch { return ""; } });
-  const [memoryPath, setMemoryPath] = useState(() => { try { return localStorage.getItem("nami-memory-path") || ""; } catch { return ""; } });
-  const [agentsPath, setAgentsPath] = useState(() => { try { return localStorage.getItem("nami-agents-path") || ""; } catch { return ""; } });
+  const [projectRoot, setProjectRoot] = useState(() => { try { return localStorage.getItem("nami-agent-root") || "C:\\Users\\jmdem\\maru-desktop"; } catch { return "C:\\Users\\jmdem\\maru-desktop"; } });
+  const [memoryPath, setMemoryPath] = useState(() => { try { return localStorage.getItem("nami-memory-path") || "C:\\Users\\jmdem\\Maru\\memory.md"; } catch { return "C:\\Users\\jmdem\\Maru\\memory.md"; } });
+  const [agentsPath, setAgentsPath] = useState(() => { try { return localStorage.getItem("nami-agents-path") || "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } catch { return "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } });
   const [memoryContent, setMemoryContent] = useState("");
   const [agentsContent, setAgentsContent] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -439,7 +456,29 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
       "If the user asks for exact visible top-level windows, use PowerShell Add-Type with user32.dll EnumWindows and count visible windows with non-empty titles.",
       "TOKEN RULE: Be concise. Ask for targeted files and focused commands. Do not paste full files or huge logs unless Senpai asks.",
       "AGENT LOOP: Use one or two focused tool calls, inspect the result, then continue only if more evidence is needed.",
-      "Applet routing: [ROUTE:TAG] with tags CUP, TUP, DAEL, PHOTO, OPTIONS, AMG, WORDEL, SCHED, TIER, LRC.",
+      "Applet routing: To switch the user interface to a built-in applet/screen, you must output the corresponding [ROUTE:TAG] token anywhere in your message.",
+      "Available routes:",
+      "  - CUP: Cup, Cupper, Cuppers (a cup guessing/rhythm-like game)",
+      "  - TUP: Tup Grade Solver (grade checker/GPA calculator)",
+      "  - DAEL: Dael or No Dael (Deal or No Deal game variant)",
+      "  - PHOTO: PhotoServe (photo viewer/gallery applet for managing images/photos)",
+      "  - OPTIONS: Desktop Options / Settings",
+      "  - AMG: Apple Music Game (music playlist guessing game)",
+      "  - WORDEL: Wordel (word guessing game)",
+      "  - SCHED: Class Schedule Editor / SchedEdit",
+      "  - TIER: Tiertrack (Colorful Stage event tier prediction/trends)",
+      "  - LRC: Lyrics Database / Last.fm synced lyrics",
+      "When the user asks to open, launch, or view one of these applets (e.g. \"open photoserve\"), respond warmly in your character and include the route token (e.g. \"Sure, opening PhotoServe for you, Senpai! [ROUTE:PHOTO]\"). Do NOT say you cannot open applications when they ask for these built-in applets.",
+      "",
+      "APPLE MUSIC PLAYBACK RULE: When the user asks to play a song, follow these exact steps:",
+      "  1. Use run_command to call the iTunes Search API — this is more reliable than web search for finding Apple Music links.",
+      "     Command: $r = Invoke-RestMethod 'https://itunes.apple.com/search?term=SONGNAME&media=music&country=ph&limit=5'; $r.results | Select-Object trackName,artistName,trackViewUrl | Format-List",
+      "     Replace SONGNAME with the song title (URL-encode spaces as +, e.g. 'lavie' stays as 'lavie', 'ghost rule' becomes 'ghost+rule').",
+      "  2. Read the results and pick the entry whose trackName and artistName best match what the user asked for.",
+      "  3. Use the trackViewUrl from that result — it will be a real https://music.apple.com/ph/... link.",
+      "  4. Open it with run_command: Start-Process \"<trackViewUrl>\"",
+      "  5. Tell Senpai warmly which song and artist you found and opened.",
+      "  IMPORTANT: Do NOT use music:// URLs. Always use the https:// trackViewUrl from the API response.",
       "",
       "Memory:",
       memoryContent ? clampText(memoryContent, 5000) : "(none configured)",
@@ -482,19 +521,30 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     const capturedRoot = projectRoot;
     const modelOption = MODEL_OPTIONS.find(option => option.id === selectedModel) || MODEL_OPTIONS[0];
     const currentHistory: Array<{ role: string; parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, string> }; functionResponse?: { name: string; response: { content: string } } }> }> = [];
+    // Rebuild history ensuring model+function turns are always paired correctly
     const promptMessages = messages
       .filter(m => !m.confirmId)
       .slice(-MAX_HISTORY_MESSAGES);
-    for (const m of promptMessages) {
+    for (let mi = 0; mi < promptMessages.length; mi++) {
+      const m = promptMessages[mi];
       if (m.role === "function") {
-        currentHistory.push({ role: "function", parts: [{ functionResponse: { name: m.name || "unknown", response: { content: clampText(m.text, MAX_TOOL_RESULT_CHARS) } } }] });
+        // Orphaned function result — skip (the paired model+functionCall below handles it)
+        continue;
       } else if (m.role === "model" && m.functionCall) {
-        const parts: any[] = [];
-        if (m.text) {
-          parts.push({ text: clampText(m.text, MAX_PROMPT_TEXT_CHARS) });
+        // Model turn with a function call: emit model turn then immediately emit the response
+        const modelParts: any[] = [];
+        if (m.text) modelParts.push({ text: clampText(m.text, MAX_PROMPT_TEXT_CHARS) });
+        modelParts.push({ functionCall: { name: m.functionCall.name, args: m.functionCall.args } });
+        currentHistory.push({ role: "model", parts: modelParts });
+        // Look ahead for the matching function response
+        const next = promptMessages[mi + 1];
+        if (next && next.role === "function") {
+          currentHistory.push({ role: "function", parts: [{ functionResponse: { name: next.name || m.functionCall.name, response: { content: clampText(next.text, MAX_TOOL_RESULT_CHARS) } } }] });
+          mi++; // consume the paired result
+        } else {
+          // No result yet (shouldn't happen in stored history, but be safe)
+          currentHistory.push({ role: "function", parts: [{ functionResponse: { name: m.functionCall.name, response: { content: "(no result)" } } }] });
         }
-        parts.push({ functionCall: { name: m.functionCall.name, args: m.functionCall.args } });
-        currentHistory.push({ role: "model", parts });
       } else {
         currentHistory.push({ role: m.role, parts: [{ text: clampText(m.text || "", MAX_PROMPT_TEXT_CHARS) }] });
       }
@@ -506,7 +556,7 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     let rateLimitRetries = 0;
     let lastToolName = "";
     let lastToolResult = "";
-    const maxLoops = 6;
+    const maxLoops = 20;
     const MAX_RATE_LIMIT_RETRIES = 3;
     while (!done && !cancelRef.current && loopCount < maxLoops) {
       loopCount++;
@@ -596,14 +646,19 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           currentHistory.push({ role: "model", parts: modelParts });
         }
         
+        // Coerce all arg values to strings (model sometimes sends numbers/objects)
+        const safeArgs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(fc.args)) {
+          safeArgs[k] = typeof v === "string" ? v : JSON.stringify(v);
+        }
         let funcResult = "";
         try {
           switch (fc.name) {
-            case "read_file": { const r = await readFile(fc.args.path); funcResult = r.ok ? (r.content || "(empty)") : ("Error: " + r.error); break; }
-            case "write_file": { const r = await writeFile(fc.args.path, fc.args.content); funcResult = r.ok ? "File written." : ("Error: " + r.error); break; }
-            case "list_directory": { const r = await listDirectory(fc.args.path); funcResult = r.ok ? ((r.entries || []).join("\n")) : ("Error: " + r.error); break; }
-            case "web_search": { funcResult = await searchWeb(fc.args.query); break; }
-            case "run_command": { const r = await runShellCommand(fc.args.command, capturedRoot || undefined); funcResult = formatCommandResult(r); break; }
+            case "read_file": { const r = await readFile(safeArgs.path); funcResult = r.ok ? (r.content || "(empty)") : ("Error: " + r.error); break; }
+            case "write_file": { const r = await writeFile(safeArgs.path, safeArgs.content); funcResult = r.ok ? "File written." : ("Error: " + r.error); break; }
+            case "list_directory": { const r = await listDirectory(safeArgs.path); funcResult = r.ok ? ((r.entries || []).join("\n")) : ("Error: " + r.error); break; }
+            case "web_search": { funcResult = await searchWeb(safeArgs.query); break; }
+            case "run_command": { const r = await runShellCommand(safeArgs.command, capturedRoot || undefined); funcResult = formatCommandResult(r); break; }
             default: funcResult = "Unknown function: " + fc.name;
           }
         } catch (err) { funcResult = "Execution error: " + err; }
@@ -638,15 +693,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     <div style={agentContainer}>
       {!hideTitlebar && (
         <div style={agentHeader}>
-          <span style={{ fontWeight: 600, opacity: 0.8 }}>🐱 Nami</span>
-          <div style={modeGroup}>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("SF Mono") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'SF Mono', 'Cascadia Code', 'Consolas', monospace")}>Code</button>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Comic") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Comic Sans MS', 'Comic Neue', cursive")}>Comic</button>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Segoe UI") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Segoe UI', 'Inter', system-ui, sans-serif")}>UI</button>
-          </div>
-          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
-          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
-          <span style={headerSep}>·</span>
+          {/* Identity block */}
+          <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#78b0ff", letterSpacing: "0.02em", flexShrink: 0 }}>🐱 Nami</span>
+          <span style={{ ...headerSep, margin: "0 0.1rem" }}>·</span>
           <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={selectStyle} title="Gemini model">
             {MODEL_OPTIONS.map(option => (
               <option key={option.id} value={option.id}>{option.label} · {option.note}</option>
@@ -663,8 +712,17 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           <input type="file" ref={fileInputRef} style={{ display: "none" }} {...{ webkitdirectory: "" }} onChange={e => { const files = e.target.files; if (files && files.length > 0) { setProjectRoot((files[0] as any).path || files[0].webkitRelativePath.split("/")[0]); } }} />
           <button type="button" style={browseButton} onClick={() => fileInputRef.current?.click()}>📁</button>
           <span style={headerSep}>·</span>
-          <input type="text" value={memoryPath} onChange={e => setMemoryPath(e.target.value)} placeholder="memory.md path..." style={pathInputStyle} title="Memory file path" />
-          <input type="text" value={agentsPath} onChange={e => setAgentsPath(e.target.value)} placeholder="agents.md path..." style={pathInputStyle} title="Agent instructions path" />
+          {/* Font controls */}
+          <div style={modeGroup}>
+            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("SF Mono") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'SF Mono', 'Cascadia Code', 'Consolas', monospace")}>Code</button>
+            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Comic") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Comic Sans MS', 'Comic Neue', cursive")}>Comic</button>
+            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Segoe UI") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Segoe UI', 'Inter', system-ui, sans-serif")}>UI</button>
+          </div>
+          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
+          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
+          <span style={headerSep}>·</span>
+          <input type="text" value={memoryPath} onChange={e => setMemoryPath(e.target.value)} placeholder="memory.md" style={pathInputStyle} title="Memory file path" />
+          <input type="text" value={agentsPath} onChange={e => setAgentsPath(e.target.value)} placeholder="agents.md" style={pathInputStyle} title="Agent instructions path" />
           <span style={headerSep}>·</span>
           <input type="text" value={messengerCode} onChange={e => setMessengerCode(e.target.value)} placeholder="Messenger code..." style={pathInputStyle} title="Paste Messenger Link Code from website (JWT)" />
           <div style={headerRight}>
@@ -676,7 +734,18 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
       )}
       <div ref={logRef} style={{ ...agentLog, fontFamily, fontSize: `${fontSizePx}px`, lineHeight: `${Math.round(fontSizePx * 1.5)}px` }}>
         {messages.map((msg, i) => (
-          <div key={i} style={agentEntry} className="nami-entry">
+        <div
+          key={i}
+          style={{
+            ...agentEntry,
+            borderLeft: msg.role === "user"
+              ? "2px solid rgba(180,224,142,0.5)"
+              : msg.role === "function"
+              ? "2px solid rgba(240,192,96,0.4)"
+              : "2px solid rgba(120,176,255,0.35)",
+          }}
+          className="nami-entry"
+        >
             <div style={agentEntryLabel}>
               <EntryLabel role={msg.role} name={msg.name} args={msg.functionCall?.args} />
             </div>
@@ -720,18 +789,19 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           </div>
         ))}
         {running && (
-          <div style={{ ...agentEntry, borderLeft: "2px solid #b4e08e" }} className="nami-thinking">
+          <div style={{ ...agentEntry, borderLeft: "2px solid rgba(180,224,142,0.6)" }} className="nami-thinking">
             <div style={agentEntryLabel}>
-              <span style={{ color: "#b4e08e", fontWeight: 600, fontSize: "0.82rem" }}>🐱 nami</span>
+              <span style={{ color: "#78b0ff", fontWeight: 600, fontSize: "0.82rem" }}>🐱 nami</span>
             </div>
-            <div style={agentEntryContent}>
+            <div style={{ ...agentEntryContent, display: "flex", alignItems: "center", gap: "0.35rem", paddingTop: "0.1rem" }}>
               {rateLimitStatus ? (
                 <span style={{ color: "#ffa726", fontSize: "0.85rem" }}>{rateLimitStatus.message}</span>
               ) : (
                 <>
-                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />{" "}
-                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />{" "}
-                  <span style={{ ...thinkingDot, animation: "bounce 1.4s infinite" }} className="nami-dot" />
+                  <span style={{ ...thinkingDot, animationDelay: "0ms" }} className="nami-dot" />{" "}
+                  <span style={{ ...thinkingDot, animationDelay: "160ms" }} className="nami-dot" />{" "}
+                  <span style={{ ...thinkingDot, animationDelay: "320ms" }} className="nami-dot" />
+                  <span style={{ marginLeft: "0.4rem", fontSize: "0.78rem", opacity: 0.45 }}>thinking...</span>
                 </>
               )}
             </div>
@@ -742,15 +812,16 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
 
       <form onSubmit={handleSubmit} style={inputRow}>
         <input
+          ref={inputRef}
           type="text"
-          placeholder={running ? "Type to steer Nami mid-conversation..." : "Tell Nanami what to do..."}
+          placeholder={running ? "Message to redirect Nami..." : "Tell Nanami what to do..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           style={chatInput}
           autoFocus
         />
-        <button type="submit" disabled={!input.trim()} style={sendButton}>
-          Send
+        <button type="submit" style={running ? stopButton : sendButton}>
+          {running ? "■ Stop" : "Send"}
         </button>
       </form>
     </div>
@@ -812,28 +883,33 @@ function ConfirmBlock({
 }
 
 function EntryLabel({ role, name, args }: { role: string; name?: string; args?: Record<string, string> }) {
-  const label = role === "user" ? "\uD83E\uDDD1 Senpai" : role === "function" ? ("\u26A1 " + (name || "func")) : "\uD83D\uDC31 nami";
+  const label = role === "user" ? "🧑 Senpai" : role === "function" ? ("⚡ " + (name || "func")) : "🐱 Nami";
   const color = role === "user" ? "#b4e08e" : role === "function" ? "#f0c060" : "#78b0ff";
   return (
     <span style={{ color, fontWeight: 600, fontSize: "0.82rem" }}>
       {label}
       {args && name === "run_command" && (
-        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65, color: "#e0e0e0" }}>
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.55, color: "#e0e0e0" }}>
           $ {args.command?.length > 80 ? args.command.slice(0, 80) + "…" : args.command}
         </span>
       )}
       {args && name === "read_file" && (
-        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.55 }}>
           📄 {args.path}
         </span>
       )}
       {args && name === "write_file" && (
-        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.55 }}>
           ✏️ {args.path}
         </span>
       )}
+      {args && name === "list_directory" && (
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.55 }}>
+          📁 {args.path}
+        </span>
+      )}
       {args && name === "web_search" && (
-        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.65 }}>
+        <span style={{ marginLeft: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.55 }}>
           🔍 {args.query?.length > 60 ? args.query.slice(0, 60) + "…" : args.query}
         </span>
       )}
@@ -1213,6 +1289,18 @@ const sendButton: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const stopButton: CSSProperties = {
+  padding: "0.7rem 1.2rem",
+  borderRadius: 12,
+  border: "1px solid rgba(239,108,120,0.35)",
+  background: "rgba(239,108,120,0.1)",
+  color: "#ef6c78",
+  fontSize: "0.88rem",
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
 const codeBlockOuter: CSSProperties = {
   margin: "0.6rem 0",
   borderRadius: 10,
@@ -1257,12 +1345,13 @@ const loadingContainer: CSSProperties = {
 };
 
 const thinkingDot: CSSProperties = {
-  width: 8,
-  height: 8,
+  display: "inline-block",
+  width: 6,
+  height: 6,
   borderRadius: "50%",
   background: "var(--theme-accent-border, #78b0ff)",
-  animation: "pulse 1.2s infinite",
-  opacity: 0.5,
+  animation: "namiDotBounce 1.2s ease-in-out infinite",
+  opacity: 0.7,
 };
 
 const selectStyle: CSSProperties = {

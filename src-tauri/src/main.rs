@@ -1184,11 +1184,6 @@ fn parse_gemini_response(response_body: serde_json::Value) -> Result<NamiAgentCh
         .and_then(|c| c.first())
         .ok_or_else(|| "No candidates returned from Gemini".to_string())?;
 
-    let finish_reason = candidate
-        .get("finishReason")
-        .and_then(|r| r.as_str())
-        .unwrap_or("");
-
     let content = candidate
         .get("content")
         .ok_or_else(|| "No content in Gemini response".to_string())?;
@@ -1228,7 +1223,7 @@ fn parse_gemini_response(response_body: serde_json::Value) -> Result<NamiAgentCh
     Ok(NamiAgentChatResponse {
         text,
         function_call,
-        done: finish_reason == "STOP" && has_no_fc,
+        done: has_no_fc,
     })
 }
 
@@ -1402,8 +1397,9 @@ async fn nami_agent_web_search(
     let search_body = serde_json::json!({
         "contents": [{
             "role": "user",
-            "parts": [{"text": format!("Provide a concise answer for: {}. Include any relevant details or URLs if known.", query)}]
+            "parts": [{"text": format!("Perform a Google Search for: '{}'. Return the search results as a list. For each result, you MUST include the exact title, the exact full URL (do not alter, summarize, or shorten it), and a short snippet.", query)}]
         }],
+        "tools": [{"google_search": {}}],
         "generationConfig": {
             "temperature": 0.3,
             "maxOutputTokens": 500
@@ -1430,6 +1426,19 @@ async fn nami_agent_web_search(
         if let Ok(resp) = state.client.post(&url).json(&search_body).send().await {
             if resp.status().is_success() {
                 if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    // Extract grounding chunk URLs (real search result URLs from Google Search grounding)
+                    let grounding_urls: Vec<String> = data["candidates"]
+                        .as_array()
+                        .and_then(|c| c.first())
+                        .and_then(|c| c["groundingMetadata"]["groundingChunks"].as_array())
+                        .map(|chunks| {
+                            chunks.iter()
+                                .filter_map(|chunk| chunk["web"]["uri"].as_str())
+                                .map(|u| u.to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     if let Some(text) = data["candidates"]
                         .as_array()
                         .and_then(|c| c.first())
@@ -1438,7 +1447,14 @@ async fn nami_agent_web_search(
                         .and_then(|p| p["text"].as_str())
                     {
                         if !text.is_empty() {
-                            return Ok(format!("[Web search results for: {}]\n\n{}", query, text));
+                            let mut result = format!("[Web search results for: {}]\n\n{}", query, text);
+                            if !grounding_urls.is_empty() {
+                                result.push_str("\n\nSource URLs:\n");
+                                for url in &grounding_urls {
+                                    result.push_str(&format!("- {}\n", url));
+                                }
+                            }
+                            return Ok(result);
                         }
                     }
                 }
