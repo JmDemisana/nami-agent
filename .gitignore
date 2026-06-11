@@ -7,7 +7,7 @@ desktop-web-dist/
 out/
 src-tauri/target/
 
-# Electron build artifacts
+# Build artifacts
 *.AppImage
 *.deb
 *.dmg

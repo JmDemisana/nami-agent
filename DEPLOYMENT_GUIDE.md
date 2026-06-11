@@ -42,7 +42,7 @@ Exact outputs depend on the host OS. Windows bundles should be built on Windows.
 
 ## Desktop Notes
 
-- The desktop shell is Tauri-only. Electron runtime files are no longer part of this repo.
+- The desktop shell is Tauri-only. No legacy runtime files are part of this repo.
 - `Files`, `Files Database`, `Elevation`, and shared desktop account storage now rely on the Tauri bridge in `src-tauri/src/main.rs`.
 - The Windows-first File Explorer mirror is intentionally conservative: it mirrors folders plus placeholder file names, and it defaults to read-only behavior unless Elevation is active.
 - macOS and Linux can still run the app, but File Explorer style integration has not been fully validated there yet.

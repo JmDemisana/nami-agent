@@ -4,7 +4,7 @@ Desktop shell for Maru applets. Built with Tauri.
 
 ## License
 
-**GNU General Public License v3.0 (GPL-3.0)** - See [LICENSE](LICENSE) for full text.
+**GNU General Public License v3.0 (GPL-3.0)** — See [LICENSE](LICENSE) for full text.
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
@@ -12,16 +12,16 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+## Installing
+
+If you just want to run the app, grab the latest Windows release and run either:
+
+- `Maru-Desktop_0.0.9_x64-setup.exe`
+- `Maru-Desktop_0.0.9_x64_en-US.msi`
+
+You do not need to build the project yourself for that.
+
 ## Building on Windows
-
-### Install on Windows
-
-If you just want the app, download the latest Windows release and run either:
-
-- `Maru-Desktop_0.0.7_x64-setup.exe`
-- `Maru-Desktop_0.0.7_x64_en-US.msi`
-
-You do not need to build the project yourself for that path.
 
 ### Prerequisites
 
@@ -55,7 +55,7 @@ cp -r desktop-web-dist/ C:\path\to\maru-desktop\
 ### Building for Windows
 
 ```bash
-npm run tauri -- build --bundles msi
+npm run tauri:build -- --bundles msi
 ```
 
 This creates Windows release bundles in `src-tauri/target/release/bundle/`.
@@ -95,7 +95,7 @@ Build the web assets in the main Maru website repo first, then copy `desktop-web
 ### Building for Linux
 
 ```bash
-npm run tauri -- build --bundles deb,appimage
+npm run tauri:build -- --bundles deb,appimage
 ```
 
 This creates Linux bundles in `src-tauri/target/release/bundle/`.
@@ -130,21 +130,22 @@ Build the web assets in the main Maru website repo first, then copy `desktop-web
 ### Building for macOS
 
 ```bash
-npm run tauri -- build --bundles dmg
+npm run tauri:build -- --bundles dmg
 ```
 
 This creates a macOS bundle in `src-tauri/target/release/bundle/dmg/`.
 
 ## Project Structure
 
-- `src-tauri/` - Tauri host app
-- `src/desktop/` - Desktop web app entry
-- `desktop-web-dist/` - Built web assets copied from the main Maru repo
-- `tauri-launcher.html` - Offline launcher shell
+- `src-tauri/` — Tauri host app (Rust backend, native bridges)
+- `src/desktop/` — Desktop web app entry point and components
+- `desktop-web-dist/` — Built web assets copied from the main Maru repo
+- `scripts/` — Platform install scripts and build helpers
+- `tauri-launcher.html` — Offline launcher shell
 
 ## Notes
 
-- The desktop app runs the shared web applets inside a native Tauri shell.
-- Files, Files Database, Elevation, and shared account sync still need the Maru backend online.
-- The File Explorer structure mirror is aimed at Windows first. macOS and Linux still need manual integration testing.
-- Shared desktop auth state is stored locally in the app data folder, not in the repo.
+- The desktop app runs shared web applets inside a native Tauri shell.
+- Files, Files Database, Elevation, and shared account sync still require the Maru backend to be online.
+- The File Explorer structure mirror targets Windows first. macOS and Linux still need manual integration testing.
+- Releases are built locally, not through CI. See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for the release flow.

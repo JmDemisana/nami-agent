@@ -12,6 +12,7 @@ import ClassScheduleEditor from "../pages/ClassScheduleEditor";
 import Tiertrack from "../pages/Tiertrack";
 import LyricsDatabase from "../pages/LyricsDatabase";
 import DesktopOptions from "./DesktopOptions";
+import UpdateChecker from "./UpdateChecker";
 import "../index.css";
 import "../App.css";
 import "./desktop.css";
@@ -190,6 +191,7 @@ function NamiShell() {
           </div>
         </div>
       )}
+      <UpdateChecker />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "maru-desktop",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Maru Desktop - Tauri applet shell",
   "author": "Maru <maru@example.com>",
   "license": "GPL-3.0",
