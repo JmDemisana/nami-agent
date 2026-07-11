@@ -13,6 +13,10 @@ import { useState, useRef, useEffect, type FormEvent, type CSSProperties } from 
     .nami-dot { display: inline-block; }
     .nami-entry { transition: background 0.15s; }
     .nami-entry:hover { background: rgba(255,255,255,0.015); }
+    select option {
+      background-color: #111a2e !important;
+      color: #f2f6ff !important;
+    }
   `;
   document.head.appendChild(s);
 })();
