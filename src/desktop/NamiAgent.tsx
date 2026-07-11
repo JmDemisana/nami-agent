@@ -682,13 +682,27 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         if (retryMatch) {
           const wait = Math.min(parseInt(retryMatch[1]) || 30, 60);
           rateLimitRetries++;
+
+          // Extract verbose log details if provided by the backend
+          let verboseLog = "";
+          const parts = errStr.split("---VERBOSE---");
+          if (parts.length > 1) {
+            verboseLog = parts[1].trim();
+          } else {
+            verboseLog = errStr;
+          }
+
+          // Instantly show the verbose error details inside the chat history
+          const detailsMsg = `⏳ **Gemini Rate Limit Encountered (Wait: ${wait}s)**\n\n**Verbose Error Details:**\n\`\`\`\n${verboseLog}\n\`\`\``;
+          setMessages(prev => [...prev, { role: "model", text: detailsMsg }]);
+
           if (rateLimitRetries >= MAX_RATE_LIMIT_RETRIES) {
             setMessages(prev => [...prev, { role: "model", text: "⏳ Rate limited after retrying. Try again later, Senpai~ 😅" }]);
             break;
           }
           loopCount--;
           for (let i = wait; i > 0; i--) {
-            setRateLimitStatus({ waitSeconds: i, message: `⏳ Rate limited \u2014 retrying in ${i}s` });
+            setRateLimitStatus({ waitSeconds: i, message: `⏳ Rate limited — retrying in ${i}s` });
             await new Promise(r => setTimeout(r, 1000));
             if (cancelRef.current) break;
           }
