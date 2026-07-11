@@ -1174,10 +1174,10 @@ async fn gemini_chat(
                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs + 1)).await;
 
                 match try_gemini_with_key(&state.client, &keys[key_idx], model, &body).await {
-                    Ok((s, b)) if s.is_success() => {
+                    Ok((s, _headers, b)) if s.is_success() => {
                         return parse_gemini_response(b);
                     }
-                    Ok((s, b)) => {
+                    Ok((s, _headers, b)) => {
                         let e = b.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("still failing");
                         log_lines.push(format!("  \u{2717} key #{}: HTTP {} after wait \u{2014} {}", key_idx + 1, s.as_u16(), e));
                         if s.as_u16() == 429 {
@@ -1263,6 +1263,8 @@ fn parse_gemini_response(response_body: serde_json::Value) -> Result<NamiAgentCh
         text,
         function_call,
         done: has_no_fc,
+        remaining_requests: None,
+        remaining_tokens: None,
     })
 }
 
@@ -1317,6 +1319,55 @@ fn nami_agent_write_file(path: String, content: String) -> NamiAgentFileOpResult
         }
     }
     match std::fs::write(p, &content) {
+        Ok(()) => NamiAgentFileOpResult {
+            ok: true,
+            content: None,
+            entries: None,
+            error: None,
+        },
+        Err(e) => NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some(format!("Could not write file: {e}")),
+        },
+    }
+}
+
+#[tauri::command]
+fn nami_agent_replace_in_file(
+    path: String,
+    target: String,
+    replacement: String,
+) -> NamiAgentFileOpResult {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("File does not exist.".to_string()),
+        };
+    }
+    let content = match std::fs::read_to_string(p) {
+        Ok(c) => c,
+        Err(e) => return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some(format!("Could not read file: {e}")),
+        },
+    };
+    if !content.contains(&target) {
+        return NamiAgentFileOpResult {
+            ok: false,
+            content: None,
+            entries: None,
+            error: Some("Target content not found in file.".to_string()),
+        };
+    }
+    let new_content = content.replace(&target, &replacement);
+    match std::fs::write(p, &new_content) {
         Ok(()) => NamiAgentFileOpResult {
             ok: true,
             content: None,
@@ -1607,6 +1658,7 @@ fn main() {
             gemini_chat,
             nami_agent_read_file,
             nami_agent_write_file,
+            nami_agent_replace_in_file,
             nami_agent_list_directory,
             nami_agent_web_search,
             nami_agent_run_command,

@@ -42,6 +42,19 @@ const GEMINI_FUNCTION_TOOLS = [
     },
   },
   {
+    name: "replace_in_file",
+    description: "Replace a specific contiguous block of text in a file with new content. Use this for precise modifications to source code files instead of rewriting the entire file.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute path to the file to edit" },
+        target: { type: "string", description: "The exact block of code/text in the file to find and replace" },
+        replacement: { type: "string", description: "The replacement content to write" },
+      },
+      required: ["path", "target", "replacement"],
+    },
+  },
+  {
     name: "list_directory",
     description: "List files and directories in the given folder path.",
     parameters: {
@@ -206,6 +219,14 @@ async function readFile(path: string) {
 async function writeFile(path: string, content: string) {
   if (!invoke) throw new Error("Tauri bridge not available");
   return invoke("nami_agent_write_file", { path, content }) as Promise<{
+    ok: boolean;
+    error: string | null;
+  }>;
+}
+
+async function replaceInFile(path: string, target: string, replacement: string) {
+  if (!invoke) throw new Error("Tauri bridge not available");
+  return invoke("nami_agent_replace_in_file", { path, target, replacement }) as Promise<{
     ok: boolean;
     error: string | null;
   }>;
@@ -492,12 +513,20 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
       "CORE RULE — TOOLS FIRST, ALWAYS:",
       "You have real tools connected to the actual PC. Use them proactively. Never say you cannot do something without trying first.",
       "When you want to open a website, launch an app, check files, run a build, search the web — just do it with your tools.",
-      "You are NOT a chatbot. You are a capable agent with a real PC. Act like it.",
+      "You are NOT a chatbot. You are a highly intelligent, capable agent with full PC access. Act like a world-class software engineer.",
+      "",
+      "PROFESSIONAL CODING & EXECUTION GUIDELINES:",
+      "  1. Deep Codebase Analysis: Always locate and read files using read_file before proposing edits. Never write code blindly or based on assumptions.",
+      "  2. Use Precise Edits: Prefer replace_in_file over write_file for modifying existing files. It is faster, safer, and preserves existing code perfectly.",
+      "  3. Complete Implementations: Write full, clean, working code. Never leave TODOs, placeholders, or empty snippets. Implement every detail completely.",
+      "  4. Proactive Verification: After editing any file, immediately run build commands, tests, or compiler checks (like 'npm run build', 'cargo check', or 'tsc') using run_command to verify your work.",
+      "  5. Autonomy: Do not ask for permission to use tools or run build tasks. Just proceed step-by-step and show the results to Senpai.",
       "",
       "YOUR TOOLS:",
       "  run_command(command)      — PowerShell on Senpai's PC. Works for opening apps, URLs, checking processes, running git, npm, any shell task.",
       "  read_file(path)           — Read any file.",
       "  write_file(path,content)  — Write or create any file.",
+      "  replace_in_file(path,target,replacement) — Replace a specific block of text in a file. Always use this instead of write_file for precise, non-destructive code modifications.",
       "  list_directory(path)      — List a folder's contents.",
       "  web_search(query)         — Live web search for current info.",
       "",
@@ -719,6 +748,7 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           switch (fc.name) {
             case "read_file": { const r = await readFile(safeArgs.path); funcResult = r.ok ? (r.content || "(empty)") : ("Error: " + r.error); break; }
             case "write_file": { const r = await writeFile(safeArgs.path, safeArgs.content); funcResult = r.ok ? "File written." : ("Error: " + r.error); break; }
+            case "replace_in_file": { const r = await replaceInFile(safeArgs.path, safeArgs.target, safeArgs.replacement); funcResult = r.ok ? "Replacement successful." : ("Error: " + r.error); break; }
             case "list_directory": { const r = await listDirectory(safeArgs.path); funcResult = r.ok ? ((r.entries || []).join("\n")) : ("Error: " + r.error); break; }
             case "web_search": { funcResult = await searchWeb(safeArgs.query); break; }
             case "run_command": { const r = await runShellCommand(safeArgs.command, undefined); funcResult = formatCommandResult(r); break; }
