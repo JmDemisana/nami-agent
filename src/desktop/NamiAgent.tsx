@@ -831,64 +831,74 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     <div style={agentContainer}>
       {!hideTitlebar && (
         <div style={agentHeader}>
-          {/* Identity block */}
-          <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#78b0ff", letterSpacing: "0.02em", flexShrink: 0 }}>🐱 Nami</span>
-          <span style={{ ...headerSep, margin: "0 0.1rem" }}>·</span>
-          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={selectStyle} title="Gemini model">
-            {MODEL_OPTIONS.map(option => (
-              <option key={option.id} value={option.id}>{option.label} · {option.note}</option>
-            ))}
-          </select>
-          <span style={headerSep}>·</span>
-          {selectedModel.includes("pro") && (
-            <>
+          {/* Left section: Identity & Model Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700, fontSize: "0.85rem", color: "#78b0ff", letterSpacing: "0.03em", flexShrink: 0, marginRight: "0.3rem" }}>🐱 Nami</span>
+            
+            <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={selectStyle} title="Gemini model">
+              {MODEL_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>{option.label} · {option.note}</option>
+              ))}
+            </select>
+
+            {selectedModel.includes("pro") && (
               <span
                 style={{
                   fontSize: "0.68rem",
                   color: "#f0c060",
                   background: "rgba(240,192,96,0.1)",
                   border: "1px solid rgba(240,192,96,0.2)",
-                  padding: "0.08rem 0.3rem",
-                  borderRadius: 3,
+                  padding: "0.15rem 0.4rem",
+                  borderRadius: 6,
                   cursor: "help"
                 }}
                 title="Free tier is limited to 2 RPM. Upgrade your project to a Google Console billing-based tier in AI Studio to unlock 1000 RPM."
               >
                 ⚠️ 2 RPM (Free)
               </span>
-              <span style={headerSep}>·</span>
-            </>
-          )}
-          {rateLimits && (
-            <>
-              <span style={{ fontSize: "0.68rem", opacity: 0.55, display: "flex", gap: "0.25rem", alignItems: "center" }} title="Remaining requests / tokens in current minute window">
+            )}
+
+            {rateLimits && (
+              <span style={{ fontSize: "0.68rem", opacity: 0.55, display: "flex", gap: "0.25rem", alignItems: "center", background: "rgba(255,255,255,0.02)", padding: "0.15rem 0.4rem", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)" }} title="Remaining requests / tokens in current minute window">
                 <span>Rem: {rateLimits.remainingRequests ?? "N/A"} Req</span>
                 <span>/</span>
                 <span>{rateLimits.remainingTokens ?? "N/A"} Tok</span>
               </span>
-              <span style={headerSep}>·</span>
-            </>
-          )}
-          <select value={confirmMode} onChange={e => setConfirmMode(e.target.value as any)} style={selectStyle} title="Write & Command Confirmation Mode">
-            <option value="confirm">🔒 Confirm writes</option>
-            <option value="auto">⚡ Auto (All)</option>
-          </select>
-          <span style={headerSep}>·</span>
-          {/* Font controls */}
-          <div style={modeGroup}>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("SF Mono") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'SF Mono', 'Cascadia Code', 'Consolas', monospace")}>Code</button>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Comic") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Comic Sans MS', 'Comic Neue', cursive")}>Comic</button>
-            <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Segoe UI") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Segoe UI', 'Inter', system-ui, sans-serif")}>UI</button>
-          </div>
-          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
-          <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
-          <span style={headerSep}>·</span>
-          <input type="text" value={messengerCode} onChange={e => setMessengerCode(e.target.value)} placeholder="Messenger code..." style={pathInputStyle} title="Paste Messenger Link Code from website (JWT)" />
-          <div style={headerRight}>
+            )}
 
-            <button type="button" style={copyLogButton} onClick={() => { const t = messages.map(m => m.role + ": " + m.text).join("\n\n"); navigator.clipboard.writeText(t).then(() => {}); }} title="Copy session">📋 Copy</button>
-            <button type="button" style={copyLogButton} onClick={() => { setMessages([]); }} title="Clear session">🗑️ Clear</button>
-            <button type="button" style={resetKeyButton} onClick={onReset} title="Reset API key">Reset</button>
+            <select value={confirmMode} onChange={e => setConfirmMode(e.target.value as any)} style={selectStyle} title="Write & Command Confirmation Mode">
+              <option value="confirm">🔒 Confirm writes</option>
+              <option value="auto">⚡ Auto (All)</option>
+            </select>
+          </div>
+
+          {/* Right section: Aesthetic Font Settings, Input & Global Actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", marginLeft: "auto" }}>
+            {/* Font Control Pill */}
+            <div style={modeGroup}>
+              <button type="button" style={{ ...modeButton, ...(fontFamily.includes("SF Mono") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'SF Mono', 'Cascadia Code', 'Consolas', monospace")}>Code</button>
+              <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Comic") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Comic Sans MS', 'Comic Neue', cursive")}>Comic</button>
+              <button type="button" style={{ ...modeButton, ...(fontFamily.includes("Segoe UI") ? modeButtonActive : {}) }} onClick={() => setFontFamily("'Segoe UI', 'Inter', system-ui, sans-serif")}>UI</button>
+            </div>
+
+            {/* Sizing buttons */}
+            <div style={{ display: "flex", gap: "0.1rem", background: "rgba(0,0,0,0.15)", borderRadius: 6, padding: "0.1rem", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <button type="button" style={{ ...modeButton, padding: "0.15rem 0.35rem" }} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
+              <button type="button" style={{ ...modeButton, padding: "0.15rem 0.35rem" }} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
+            </div>
+
+            {/* Messenger Connection capsule */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", background: "rgba(0,0,0,0.2)", borderRadius: 6, padding: "0.15rem 0.45rem", border: "1px solid rgba(255,255,255,0.06)", height: 21, boxSizing: "border-box" }}>
+              <span style={{ fontSize: "0.68rem", opacity: 0.6 }} title="Messenger Sync Link Code">🔑</span>
+              <input type="text" value={messengerCode} onChange={e => setMessengerCode(e.target.value)} placeholder="Messenger sync..." style={pathInputStyle} title="Paste Messenger Link Code from website (JWT)" />
+            </div>
+
+            {/* Action pills */}
+            <div style={{ display: "flex", gap: "0.25rem" }}>
+              <button type="button" style={actionButtonStyle} onClick={() => { const t = messages.map(m => m.role + ": " + m.text).join("\n\n"); navigator.clipboard.writeText(t).then(() => {}); }} title="Copy session">📋 Copy</button>
+              <button type="button" style={actionButtonStyle} onClick={() => { setMessages([]); }} title="Clear session">🗑️ Clear</button>
+              <button type="button" style={resetKeyButtonStyle} onClick={onReset} title="Reset API key">Reset</button>
+            </div>
           </div>
         </div>
       )}
@@ -1393,10 +1403,14 @@ const agentContainer: CSSProperties = {
 const agentHeader: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: "0.5rem",
-  padding: "0.4rem 0.8rem",
+  justifyContent: "space-between",
+  flexWrap: "wrap",
+  gap: "0.5rem 1rem",
+  padding: "0.45rem 0.9rem",
   borderBottom: "1px solid rgba(255,255,255,0.06)",
-  background: "var(--theme-panel-bg, rgba(10,18,34,0.72))",
+  background: "var(--theme-panel-bg, rgba(13, 20, 35, 0.85))",
+  backdropFilter: "blur(12px)",
+  WebkitBackdropFilter: "blur(12px)",
   fontSize: "0.82rem",
   flexShrink: 0,
 };
@@ -1410,19 +1424,25 @@ const headerRight: CSSProperties = {
 
 const modeGroup: CSSProperties = {
   display: "flex",
-  gap: "0.15rem",
+  background: "rgba(0,0,0,0.2)",
+  border: "1px solid rgba(255,255,255,0.05)",
+  borderRadius: 6,
+  padding: "0.1rem",
+  gap: "0.1rem",
 };
 
 const modeButton: CSSProperties = {
-  padding: "0.15rem 0.4rem",
-  borderRadius: 3,
-  border: "1px solid rgba(255,255,255,0.08)",
+  padding: "0.15rem 0.45rem",
+  borderRadius: 4,
+  border: "none",
   background: "transparent",
-  color: "var(--theme-text-strong, #f2f6ff)",
+  color: "var(--theme-text-strong, #cbd5e1)",
   fontSize: "0.68rem",
+  fontWeight: 500,
   cursor: "pointer",
-  opacity: 0.5,
+  opacity: 0.55,
   whiteSpace: "nowrap",
+  transition: "all 0.15s ease",
 };
 
 const copyLogButton: CSSProperties = {
@@ -1433,8 +1453,9 @@ const copyLogButton: CSSProperties = {
 
 const modeButtonActive: CSSProperties = {
   opacity: 1,
-  borderColor: "rgba(120,176,255,0.3)",
-  background: "rgba(120,176,255,0.08)",
+  background: "rgba(120,176,255,0.12)",
+  color: "#78b0ff",
+  fontWeight: 600,
 };
 
 const headerSep: CSSProperties = {
@@ -1466,14 +1487,32 @@ const rootInputStyle: CSSProperties = {
 };
 
 const pathInputStyle: CSSProperties = {
-  padding: "0.1rem 0.3rem",
-  borderRadius: 3,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.3)",
-  color: "var(--theme-text-strong, #f2f6ff)",
   fontSize: "0.68rem",
+  color: "var(--theme-text-strong, #f2f6ff)",
   outline: "none",
-  width: 100,
+  width: 95,
+  border: "none",
+  background: "transparent",
+};
+
+const actionButtonStyle: CSSProperties = {
+  padding: "0.2rem 0.55rem",
+  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(255,255,255,0.03)",
+  color: "var(--theme-text-strong, #e2e8f0)",
+  fontSize: "0.7rem",
+  fontWeight: 500,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  transition: "all 0.15s ease",
+};
+
+const resetKeyButtonStyle: CSSProperties = {
+  ...actionButtonStyle,
+  background: "rgba(239, 68, 68, 0.04)",
+  borderColor: "rgba(239, 68, 68, 0.15)",
+  color: "#fda4af",
 };
 
 const resetKeyButton: CSSProperties = {
