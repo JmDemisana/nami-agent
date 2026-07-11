@@ -103,15 +103,43 @@ const invoke = window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core);
 const MODEL_OPTIONS = [
   {
     id: "gemini-2.5-flash-lite",
-    label: "Lite",
-    note: "15 RPM / 1k RPD",
-    maxOutputTokens: 1536,
+    label: "Lite (2.5 Flash Lite)",
+    note: "15 RPM Free",
+    maxOutputTokens: 2048,
     thinkingBudget: 0,
   },
   {
     id: "gemini-2.5-flash",
-    label: "Flash",
-    note: "10 RPM / 250 RPD",
+    label: "Flash (2.5 Flash)",
+    note: "10 RPM Free",
+    maxOutputTokens: 3072,
+    thinkingBudget: 0,
+  },
+  {
+    id: "gemini-2.5-pro",
+    label: "Pro (2.5 Pro Reasoning)",
+    note: "Thinking, 2 RPM Free",
+    maxOutputTokens: 8192,
+    thinkingBudget: 4096,
+  },
+  {
+    id: "gemini-2.0-flash",
+    label: "Flash (2.0 Flash)",
+    note: "10 RPM Free",
+    maxOutputTokens: 2048,
+    thinkingBudget: 0,
+  },
+  {
+    id: "gemini-1.5-pro",
+    label: "Pro (1.5 Pro)",
+    note: "2 RPM Free",
+    maxOutputTokens: 8192,
+    thinkingBudget: 0,
+  },
+  {
+    id: "gemini-1.5-flash",
+    label: "Flash (1.5 Flash)",
+    note: "15 RPM Free",
     maxOutputTokens: 2048,
     thinkingBudget: 0,
   },
@@ -314,7 +342,10 @@ function NamiAgentSetup({ onKeySet }: { onKeySet: () => void }) {
             <li>Copy the key and paste it below</li>
           </ol>
           <p style={{ margin: "0.7rem 0 0", fontSize: "0.84rem", opacity: 0.7 }}>
-            You need at least <strong>one active free-tier Gemini key</strong> that isn't rate-limited or erroring out. Got multiple keys? Paste them separated by commas — I'll pick one at random and fall through if one hits a limit. 😏
+            You need at least <strong>one active Gemini API key</strong>. Got multiple keys? Paste them separated by commas — I'll pick one at random and rotate if one hits a limit. 😏
+          </p>
+          <p style={{ margin: "0.5rem 0 0", fontSize: "0.8rem", opacity: 0.5, borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "0.5rem" }}>
+            💡 <strong>Rate Limit Tip:</strong> The free tier of Gemini Pro is limited to 2 RPM. To use Pro model reasoning with high limits (1000 RPM), upgrade your API project to a Google Cloud Console billing-based tier.
           </p>
         </div>
 
@@ -355,6 +386,29 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedImage, setSelectedImage] = useState<{ mimeType: string; data: string; url: string } | null>(null);
+  const [rateLimits, setRateLimits] = useState<{ remainingRequests?: number; remainingTokens?: number } | null>(null);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const commaIdx = dataUrl.indexOf(",");
+      if (commaIdx !== -1) {
+        const base64Data = dataUrl.substring(commaIdx + 1);
+        setSelectedImage({
+          mimeType: file.type,
+          data: base64Data,
+          url: dataUrl
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
   const [rateLimitStatus, setRateLimitStatus] = useState<{ waitSeconds: number; message: string } | null>(null);
   const cancelRef = useRef(false);
   const [selectedModel, setSelectedModel] = useState(() => {
@@ -536,7 +590,17 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           currentHistory.push({ role: "function", parts: [{ functionResponse: { name: m.functionCall.name, response: { content: "(no result)" } } }] });
         }
       } else {
-        currentHistory.push({ role: m.role, parts: [{ text: clampText(m.text || "", MAX_PROMPT_TEXT_CHARS) }] });
+        const parts: any[] = [];
+        if (m.text) {
+          parts.push({ text: clampText(m.text, MAX_PROMPT_TEXT_CHARS) });
+        }
+        if (m.image) {
+          parts.push({ inlineData: { mimeType: m.image.mimeType, data: m.image.data } });
+        }
+        if (parts.length === 0) {
+          parts.push({ text: "" });
+        }
+        currentHistory.push({ role: m.role, parts });
       }
     }
     // Broadcast user message to companion clients
@@ -545,8 +609,17 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         message: JSON.stringify({ type: "user_message", role: "user", text: userMsg }),
       }).catch(() => {});
     }
-    currentHistory.push({ role: "user", parts: [{ text: userMsg }] });
-    setMessages(prev => [...prev, { role: "user", text: userMsg }]);
+    const userParts: any[] = [{ text: userMsg }];
+    if (selectedImage) {
+      userParts.push({ inlineData: { mimeType: selectedImage.mimeType, data: selectedImage.data } });
+    }
+    currentHistory.push({ role: "user", parts: userParts });
+    setMessages(prev => [...prev, {
+      role: "user",
+      text: userMsg,
+      image: selectedImage ? { mimeType: selectedImage.mimeType, data: selectedImage.data } : undefined
+    }]);
+    setSelectedImage(null);
     let done = false;
     let loopCount = 0;
     let rateLimitRetries = 0;
@@ -563,6 +636,12 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           maxOutputTokens: modelOption.maxOutputTokens,
           thinkingBudget: modelOption.thinkingBudget,
         });
+        if (result && (result.remainingRequests !== undefined || result.remainingTokens !== undefined)) {
+          setRateLimits({
+            remainingRequests: result.remainingRequests,
+            remainingTokens: result.remainingTokens,
+          });
+        }
       }
       catch (err) {
         const errStr = String(err);
@@ -692,6 +771,35 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
             ))}
           </select>
           <span style={headerSep}>·</span>
+          {selectedModel.includes("pro") && (
+            <>
+              <span
+                style={{
+                  fontSize: "0.68rem",
+                  color: "#f0c060",
+                  background: "rgba(240,192,96,0.1)",
+                  border: "1px solid rgba(240,192,96,0.2)",
+                  padding: "0.08rem 0.3rem",
+                  borderRadius: 3,
+                  cursor: "help"
+                }}
+                title="Free tier is limited to 2 RPM. Upgrade your project to a Google Console billing-based tier in AI Studio to unlock 1000 RPM."
+              >
+                ⚠️ 2 RPM (Free)
+              </span>
+              <span style={headerSep}>·</span>
+            </>
+          )}
+          {rateLimits && (
+            <>
+              <span style={{ fontSize: "0.68rem", opacity: 0.55, display: "flex", gap: "0.25rem", alignItems: "center" }} title="Remaining requests / tokens in current minute window">
+                <span>Rem: {rateLimits.remainingRequests ?? "N/A"} Req</span>
+                <span>/</span>
+                <span>{rateLimits.remainingTokens ?? "N/A"} Tok</span>
+              </span>
+              <span style={headerSep}>·</span>
+            </>
+          )}
           <select value={confirmMode} onChange={e => setConfirmMode(e.target.value as any)} style={selectStyle} title="Write & Command Confirmation Mode">
             <option value="confirm">🔒 Confirm writes</option>
             <option value="auto">⚡ Auto (All)</option>
@@ -765,7 +873,24 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
                     }}
                   />
                 ) : (
-                  <FormattedMessage text={msg.text} onApply={handleApply} fontSize={fontSizePx} />
+                  <>
+                    {msg.image && (
+                      <div style={{ marginBottom: "0.5rem" }}>
+                        <img
+                          src={`data:${msg.image.mimeType};base64,${msg.image.data}`}
+                          alt="Attachment"
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: "160px",
+                            borderRadius: "6px",
+                            border: "1px solid rgba(255, 255, 255, 0.15)",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+                          }}
+                        />
+                      </div>
+                    )}
+                    <FormattedMessage text={msg.text} onApply={handleApply} fontSize={fontSizePx} />
+                  </>
                 )}
               </div>
             )}
@@ -793,7 +918,76 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         <div ref={chatEndRef} />
       </div>
 
+      {selectedImage && (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          padding: "0.4rem 0.8rem",
+          background: "rgba(0,0,0,0.2)",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          position: "relative"
+        }}>
+          <img
+            src={selectedImage.url}
+            alt="Upload thumbnail"
+            style={{
+              height: "40px",
+              width: "40px",
+              objectFit: "cover",
+              borderRadius: "4px",
+              border: "1px solid rgba(255,255,255,0.15)"
+            }}
+          />
+          <span style={{ fontSize: "0.8rem", opacity: 0.6, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", flex: 1 }}>
+            Image attachment ({selectedImage.mimeType})
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedImage(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#ef6c78",
+              cursor: "pointer",
+              fontSize: "1.1rem",
+              padding: "0.2rem"
+            }}
+            title="Remove attachment"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} style={inputRow}>
+        <input
+          type="file"
+          accept="image/*"
+          ref={fileInputRef}
+          onChange={handleImageChange}
+          style={{ display: "none" }}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            background: "none",
+            border: "none",
+            fontSize: "1.2rem",
+            cursor: "pointer",
+            padding: "0 0.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: 0.7,
+            transition: "opacity 0.15s"
+          }}
+          className="attach-button"
+          title="Attach an image"
+        >
+          📎
+        </button>
         <input
           ref={inputRef}
           type="text"

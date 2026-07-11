@@ -776,6 +776,10 @@ struct NamiAgentChatResponse {
     text: Option<String>,
     function_call: Option<NamiAgentFunctionCall>,
     done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remaining_requests: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remaining_tokens: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -898,7 +902,14 @@ fn parse_api_keys(raw: &str) -> Vec<String> {
 }
 
 const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash-lite";
-const ALLOWED_GEMINI_MODELS: &[&str] = &["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+const ALLOWED_GEMINI_MODELS: &[&str] = &[
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+];
 
 fn select_gemini_model(requested_model: Option<&str>) -> &'static str {
     requested_model
@@ -934,7 +945,7 @@ async fn try_gemini_with_key(
     api_key: &str,
     model: &str,
     body: &serde_json::Value,
-) -> Result<(reqwest::StatusCode, serde_json::Value), String> {
+) -> Result<(reqwest::StatusCode, reqwest::header::HeaderMap, serde_json::Value), String> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
         model, api_key
@@ -948,12 +959,13 @@ async fn try_gemini_with_key(
         .map_err(|e| format!("Gemini API request failed: {e}"))?;
 
     let status = response.status();
+    let headers = response.headers().clone();
     let response_body: serde_json::Value = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse Gemini response: {e}"))?;
 
-    Ok((status, response_body))
+    Ok((status, headers, response_body))
 }
 
 #[tauri::command]
@@ -1121,7 +1133,7 @@ async fn gemini_chat(
 
         log_lines.push(format!("  \u{2192} trying key #{}...", key_idx + 1));
 
-        let (status, response_body) = match try_gemini_with_key(&state.client, &keys[key_idx], model, &body).await {
+        let (status, headers, response_body) = match try_gemini_with_key(&state.client, &keys[key_idx], model, &body).await {
             Ok(pair) => pair,
             Err(e) => {
                 log_lines.push(format!("  \u{2717} key #{}: network error \u{2014} {}", key_idx + 1, e));
@@ -1130,7 +1142,18 @@ async fn gemini_chat(
         };
 
         if status.is_success() {
-            return parse_gemini_response(response_body);
+            let mut chat_res = parse_gemini_response(response_body)?;
+            if let Some(rem_req) = headers.get("x-ratelimit-remaining-requests") {
+                if let Ok(val) = rem_req.to_str().map(|s| s.parse::<i64>()) {
+                    chat_res.remaining_requests = val.ok();
+                }
+            }
+            if let Some(rem_tok) = headers.get("x-ratelimit-remaining-tokens") {
+                if let Ok(val) = rem_tok.to_str().map(|s| s.parse::<i64>()) {
+                    chat_res.remaining_tokens = val.ok();
+                }
+            }
+            return Ok(chat_res);
         }
 
         let http_code = status.as_u16();
