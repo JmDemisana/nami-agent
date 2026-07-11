@@ -1,7 +1,7 @@
 {
-  "name": "maru-desktop",
+  "name": "nami-agent",
   "version": "0.0.9",
-  "description": "Maru Desktop - Tauri applet shell",
+  "description": "Nami Agent - Tauri applet shell",
   "author": "Maru <maru@example.com>",
   "license": "GPL-3.0",
   "type": "module",

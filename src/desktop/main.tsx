@@ -11,6 +11,7 @@ import Wordel from "../pages/Wordel";
 import ClassScheduleEditor from "../pages/ClassScheduleEditor";
 import Tiertrack from "../pages/Tiertrack";
 import LyricsDatabase from "../pages/LyricsDatabase";
+import NamiProof from "../pages/NamiProof";
 import DesktopOptions from "./DesktopOptions";
 import UpdateChecker from "./UpdateChecker";
 import "../index.css";
@@ -18,7 +19,7 @@ import "../App.css";
 import "./desktop.css";
 import { applyDesktopAppearance } from "./settings";
 
-type AppletId = "cup-cupper-cuppers" | "dael-or-no-dael" | "tup-grade-solver" | "photo-serve" | "options" | "apple-music-game" | "wordel" | "class-schedule-editor" | "tiertrack" | "lyrics-database" | null;
+type AppletId = "cup-cupper-cuppers" | "dael-or-no-dael" | "tup-grade-solver" | "photo-serve" | "options" | "apple-music-game" | "wordel" | "class-schedule-editor" | "tiertrack" | "lyrics-database" | "namiproof" | null;
 
 const APPLET_ROUTE_MAP: Record<string, AppletId> = {
   CUP: "cup-cupper-cuppers",
@@ -31,6 +32,7 @@ const APPLET_ROUTE_MAP: Record<string, AppletId> = {
   SCHED: "class-schedule-editor",
   TIER: "tiertrack",
   LRC: "lyrics-database",
+  PROOF: "namiproof",
   HOME: null as any,
 };
 
@@ -45,6 +47,7 @@ const APPLET_COMPONENTS: Record<string, React.FC> = {
   "class-schedule-editor": ClassScheduleEditor,
   "tiertrack": Tiertrack,
   "lyrics-database": LyricsDatabase,
+  "namiproof": NamiProof,
 };
 
 const NEEDS_ROUTER = new Set(["apple-music-game", "wordel", "lyrics-database"]);

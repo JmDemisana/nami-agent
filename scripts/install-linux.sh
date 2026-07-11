@@ -5,12 +5,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUNDLE_ROOT="$PROJECT_ROOT/src-tauri/target/release/bundle"
 
 log() {
-  printf '\n[maru-desktop] %s\n' "$1"
+  printf '\n[nami-agent] %s\n' "$1"
 }
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    printf '[maru-desktop] Missing required command: %s\n' "$1" >&2
+    printf '[nami-agent] Missing required command: %s\n' "$1" >&2
     exit 1
   fi
 }
@@ -52,7 +52,7 @@ install_deb_bundle() {
   deb_path="$(find "$BUNDLE_ROOT" -type f -name '*.deb' | sort | tail -n 1)"
 
   if [ -z "$deb_path" ]; then
-    printf '[maru-desktop] No .deb bundle was produced.\n' >&2
+    printf '[nami-agent] No .deb bundle was produced.\n' >&2
     exit 1
   fi
 
@@ -63,12 +63,12 @@ install_deb_bundle() {
 install_appimage_bundle() {
   local appimage_path
   local install_dir="$HOME/.local/bin"
-  local target_path="$install_dir/Maru-Desktop.AppImage"
+  local target_path="$install_dir/Nami-Agent.AppImage"
 
   appimage_path="$(find "$BUNDLE_ROOT" -type f -name '*.AppImage' | sort | tail -n 1)"
 
   if [ -z "$appimage_path" ]; then
-    printf '[maru-desktop] No AppImage bundle was produced.\n' >&2
+    printf '[nami-agent] No AppImage bundle was produced.\n' >&2
     exit 1
   fi
 
@@ -85,8 +85,8 @@ main() {
   if command -v apt-get >/dev/null 2>&1; then
     install_apt_deps
   else
-    printf '[maru-desktop] Automatic dependency install is only wired for Debian/Ubuntu right now.\n' >&2
-    printf '[maru-desktop] Install the Tauri Linux prerequisites first, then rerun this script.\n' >&2
+    printf '[nami-agent] Automatic dependency install is only wired for Debian/Ubuntu right now.\n' >&2
+    printf '[nami-agent] Install the Tauri Linux prerequisites first, then rerun this script.\n' >&2
     exit 1
   fi
 

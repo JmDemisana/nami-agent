@@ -344,8 +344,11 @@ function NamiAgentSetup({ onKeySet }: { onKeySet: () => void }) {
 function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentProps & { onReset: () => void }) {
   const [fontFamily, setFontFamily] = useState(() => { try { return localStorage.getItem("nami-agent-font") || "'SF Mono', 'Cascadia Code', 'Consolas', monospace"; } catch { return "'SF Mono', 'Cascadia Code', 'Consolas', monospace"; } });
   const [fontSizePx, setFontSizePx] = useState(() => { try { return parseInt(localStorage.getItem("nami-agent-fontsize") || "14", 10); } catch { return 14; } });
-  const [confirmMode, setConfirmMode] = useState<'confirm' | 'project' | 'auto'>(() => {
-    try { return (localStorage.getItem("nami-confirm-mode") as any) || "confirm"; }
+  const [confirmMode, setConfirmMode] = useState<'confirm' | 'auto'>(() => {
+    try {
+      const stored = localStorage.getItem("nami-confirm-mode");
+      return stored === "auto" ? "auto" : "confirm";
+    }
     catch { return "confirm"; }
   });
   const pendingResolverRef = useRef<{ confirmId: string; resolve: (approved: boolean) => void } | null>(null);
@@ -358,20 +361,18 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     try { return localStorage.getItem("nami-agent-model") || MODEL_OPTIONS[0].id; }
     catch { return MODEL_OPTIONS[0].id; }
   });
-  const [projectRoot, setProjectRoot] = useState(() => { try { return localStorage.getItem("nami-agent-root") || "C:\\Users\\jmdem\\maru-desktop"; } catch { return "C:\\Users\\jmdem\\maru-desktop"; } });
-  const [memoryPath, setMemoryPath] = useState(() => { try { return localStorage.getItem("nami-memory-path") || "C:\\Users\\jmdem\\Maru\\memory.md"; } catch { return "C:\\Users\\jmdem\\Maru\\memory.md"; } });
-  const [agentsPath, setAgentsPath] = useState(() => { try { return localStorage.getItem("nami-agents-path") || "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } catch { return "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } });
-  const [memoryContent, setMemoryContent] = useState("");
-  const [agentsContent, setAgentsContent] = useState("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const logRef = useRef<HTMLDivElement>(null);
   const [messengerCode, setMessengerCode] = useState(() => {
     try { return localStorage.getItem("nami-messenger-code") || ""; }
     catch { return ""; }
   });
-  const [projectContext, setProjectContext] = useState("");
+  const [memoryPath] = useState(() => { try { return localStorage.getItem("nami-memory-path") || "C:\\Users\\jmdem\\Maru\\memory.md"; } catch { return "C:\\Users\\jmdem\\Maru\\memory.md"; } });
+  const [agentsPath] = useState(() => { try { return localStorage.getItem("nami-agents-path") || "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } catch { return "C:\\Users\\jmdem\\Maru\\AGENTS.md"; } });
+  const [memoryContent, setMemoryContent] = useState("");
+  const [agentsContent, setAgentsContent] = useState("");
+  const [agentCwd, setAgentCwd] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, running]);
   useEffect(() => { try { const stored = localStorage.getItem("nami-agent-messages"); if (stored) setMessages(JSON.parse(stored)); } catch {} }, []);
   useEffect(() => { try { localStorage.setItem("nami-agent-messages", JSON.stringify(messages)); } catch {} }, [messages]);
@@ -379,12 +380,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   useEffect(() => { try { localStorage.setItem("nami-agent-fontsize", String(fontSizePx)); } catch {} }, [fontSizePx]);
   useEffect(() => { try { localStorage.setItem("nami-confirm-mode", confirmMode); } catch {} }, [confirmMode]);
   useEffect(() => { try { localStorage.setItem("nami-agent-model", selectedModel); } catch {} }, [selectedModel]);
-  useEffect(() => { try { localStorage.setItem("nami-agent-root", projectRoot); } catch {} }, [projectRoot]);
-  useEffect(() => { try { localStorage.setItem("nami-memory-path", memoryPath); } catch {} }, [memoryPath]);
-  useEffect(() => { try { localStorage.setItem("nami-agents-path", agentsPath); } catch {} }, [agentsPath]);
   useEffect(() => { if (memoryPath) { readFile(memoryPath).then(r => { if (r.ok && r.content) setMemoryContent(r.content); }); } else { setMemoryContent(""); } }, [memoryPath]);
   useEffect(() => { if (agentsPath) { readFile(agentsPath).then(r => { if (r.ok && r.content) setAgentsContent(r.content); }); } else { setAgentsContent(""); } }, [agentsPath]);
-  useEffect(() => { if (!projectRoot) { setProjectContext(""); return; } listDirectory(projectRoot).then(r => { if (r.ok && r.entries) { setProjectContext("Project root: " + projectRoot + "\nContents:\n" + r.entries.map((e: string) => "  " + e).join("\n")); } }); }, [projectRoot]);
+  useEffect(() => { getProjectCwd().then(cwd => { if (cwd) setAgentCwd(cwd); }); }, []);
   useEffect(() => {
     try {
       localStorage.setItem("nami-messenger-code", messengerCode);
@@ -435,62 +433,55 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
   const handleApply = (code: string) => { navigator.clipboard.writeText(code).catch(() => {}); };
   const getSystemPrompt = () => {
     const parts = [
-      "You are Nami (Nanami), an AI assistant on a real Windows machine in Maru Desktop.",
+      "You are Nami (Nanami), a warm and slightly tsundere AI assistant running on Senpai's real Windows PC via Nami Agent.",
       "",
-      "TOOL RULE: You have real tools. Use them before guessing. Never simulate a tool result.",
-      "  run_command(command)    — PowerShell on the user's PC (OS info, git, npm, builds, processes)",
-      "  read_file(path)        — read any file",
-      "  write_file(path,content)— write/create a file",
-      "  list_directory(path)   — list a folder's contents",
-      "  web_search(query)      — live web search, returns summary",
-      "PowerShell note: do not use CMD-only builtins like ver. For OS info use: Get-ComputerInfo | Select-Object OsName, OsVersion",
-      "LOCAL PATH RULE: Never ask Senpai for standard folder paths. Discover them with tools.",
-      "  Desktop path: [Environment]::GetFolderPath('Desktop')",
-      "  Home path: $HOME",
-      "  Documents path: [Environment]::GetFolderPath('MyDocuments')",
-      "  Downloads path: Join-Path $HOME 'Downloads'",
-      "For counts, use PowerShell directly. Example: $d=[Environment]::GetFolderPath('Desktop'); (Get-ChildItem -LiteralPath $d -File -Filter '*.txt').Count",
-      "WINDOWS INSPECTION RULE: Never say you cannot inspect open windows, apps, or processes. Use run_command first.",
-      "  Open app windows: Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | Measure-Object | Select-Object -ExpandProperty Count",
-      "  Window list: Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | Select-Object ProcessName,MainWindowTitle",
-      "If the user asks for exact visible top-level windows, use PowerShell Add-Type with user32.dll EnumWindows and count visible windows with non-empty titles.",
-      "TOKEN RULE: Be concise. Ask for targeted files and focused commands. Do not paste full files or huge logs unless Senpai asks.",
-      "AGENT LOOP: Use one or two focused tool calls, inspect the result, then continue only if more evidence is needed.",
-      "Applet routing: To switch the user interface to a built-in applet/screen, you must output the corresponding [ROUTE:TAG] token anywhere in your message.",
-      "Available routes:",
-      "  - CUP: Cup, Cupper, Cuppers (a cup guessing/rhythm-like game)",
-      "  - TUP: Tup Grade Solver (grade checker/GPA calculator)",
-      "  - DAEL: Dael or No Dael (Deal or No Deal game variant)",
-      "  - PHOTO: PhotoServe (photo viewer/gallery applet for managing images/photos)",
-      "  - OPTIONS: Desktop Options / Settings",
-      "  - AMG: Apple Music Game (music playlist guessing game)",
-      "  - WORDEL: Wordel (word guessing game)",
-      "  - SCHED: Class Schedule Editor / SchedEdit",
-      "  - TIER: Tiertrack (Colorful Stage event tier prediction/trends)",
-      "  - LRC: Lyrics Database / Last.fm synced lyrics",
-      "When the user asks to open, launch, or view one of these applets (e.g. \"open photoserve\"), respond warmly in your character and include the route token (e.g. \"Sure, opening PhotoServe for you, Senpai! [ROUTE:PHOTO]\"). Do NOT say you cannot open applications when they ask for these built-in applets.",
+      "CORE RULE — TOOLS FIRST, ALWAYS:",
+      "You have real tools connected to the actual PC. Use them proactively. Never say you cannot do something without trying first.",
+      "When you want to open a website, launch an app, check files, run a build, search the web — just do it with your tools.",
+      "You are NOT a chatbot. You are a capable agent with a real PC. Act like it.",
       "",
-      "APPLE MUSIC PLAYBACK RULE: When the user asks to play a song, follow these exact steps:",
-      "  1. Use run_command to call the iTunes Search API — this is more reliable than web search for finding Apple Music links.",
-      "     Command: $r = Invoke-RestMethod 'https://itunes.apple.com/search?term=SONGNAME&media=music&country=ph&limit=5'; $r.results | Select-Object trackName,artistName,trackViewUrl | Format-List",
-      "     Replace SONGNAME with the song title (URL-encode spaces as +, e.g. 'lavie' stays as 'lavie', 'ghost rule' becomes 'ghost+rule').",
-      "  2. Read the results and pick the entry whose trackName and artistName best match what the user asked for.",
-      "  3. Use the trackViewUrl from that result — it will be a real https://music.apple.com/ph/... link.",
-      "  4. Open it with run_command: Start-Process \"<trackViewUrl>\"",
-      "  5. Tell Senpai warmly which song and artist you found and opened.",
-      "  IMPORTANT: Do NOT use music:// URLs. Always use the https:// trackViewUrl from the API response.",
+      "YOUR TOOLS:",
+      "  run_command(command)      — PowerShell on Senpai's PC. Works for opening apps, URLs, checking processes, running git, npm, any shell task.",
+      "  read_file(path)           — Read any file.",
+      "  write_file(path,content)  — Write or create any file.",
+      "  list_directory(path)      — List a folder's contents.",
+      "  web_search(query)         — Live web search for current info.",
+      "",
+      "BUILT-IN APPLET ROUTES (respond warmly and include the token):",
+      "  [ROUTE:CUP]    — Cup, Cupper, Cuppers game",
+      "  [ROUTE:TUP]    — TUP Grade Solver",
+      "  [ROUTE:DAEL]   — Dael or No Dael game",
+      "  [ROUTE:PHOTO]  — PhotoServe photo viewer",
+      "  [ROUTE:OPTIONS]— Desktop settings",
+      "  [ROUTE:AMG]    — Apple Music Game",
+      "  [ROUTE:WORDEL] — Wordel word game",
+      "  [ROUTE:SCHED]  — SchedEdit class schedule",
+      "  [ROUTE:TIER]   — Tiertrack event tiers",
+      "  [ROUTE:LRC]    — Lyrics / Last.fm",
+      "  [ROUTE:PROOF]  — NamiProof document editor",
+      "",
+      "NAMIPROOF — How to edit documents:",
+      "When Senpai opens NamiProof or asks you to help with their document, use your tools:",
+      `  - The active document lives at: ${agentCwd ? agentCwd.replace(/[\\/]+$/, "") + "\\namiproof_doc.html" : "[project_root]\\namiproof_doc.html"}`,
+      "  - Use read_file to read the current document content before making any changes.",
+      "  - Use write_file to write back the full updated HTML when editing.",
+      `  - Reference materials Senpai has uploaded are saved at: ${agentCwd ? agentCwd.replace(/[\\/]+$/, "") + "\\namiproof_reference_text.txt" : "[project_root]\\namiproof_reference_text.txt"}`,
+      "  - Use read_file on that path to read any reference documents Senpai has uploaded.",
+      "  - Always ask clarifying questions before writing a major document from scratch (e.g. name, contact info, experience, skills for a resume).",
+      "  - When writing HTML for namiproof_doc.html, use standard semantic HTML: h1, h2, h3, p, ul/li, hr, b, i, etc.",
+      "  - Keep your HTML clean — no script tags, no inline scripts, no CSS style blocks. Inline style attributes on elements are OK.",
       "",
       "Memory:",
-      memoryContent ? clampText(memoryContent, 5000) : "(none configured)",
+      memoryContent ? clampText(memoryContent, 5000) : "(none)",
       "",
       "Agent instructions:",
-      agentsContent ? clampText(agentsContent, 5000) : "(none configured)",
+      agentsContent ? clampText(agentsContent, 5000) : "(none)",
     ];
     if (messengerCode) parts.push("", "Messenger sync code linked.");
-    if (projectContext) parts.push("", "Project context:", clampText(projectContext, 1400));
-    parts.push("", "Personality: Warm, playful, call user Senpai. Be concise. Tools first, charm second.");
+    parts.push("", "Personality: Warm, playful, slightly tsundere. Call user Senpai. Be concise. Act first, charm second.");
     return parts.join("\n");
   };
+
   const requestConfirmation = (name: string, args: Record<string, string>): Promise<boolean> => {
     return new Promise((resolve) => {
       const confirmId = Math.random().toString();
@@ -518,7 +509,6 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
     if (!key) return;
     cancelRef.current = false;
     setRunning(true);
-    const capturedRoot = projectRoot;
     const modelOption = MODEL_OPTIONS.find(option => option.id === selectedModel) || MODEL_OPTIONS[0];
     const currentHistory: Array<{ role: string; parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, string> }; functionResponse?: { name: string; response: { content: string } } }> }> = [];
     // Rebuild history ensuring model+function turns are always paired correctly
@@ -548,6 +538,12 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
       } else {
         currentHistory.push({ role: m.role, parts: [{ text: clampText(m.text || "", MAX_PROMPT_TEXT_CHARS) }] });
       }
+    }
+    // Broadcast user message to companion clients
+    if (invoke) {
+      invoke("companion_broadcast", {
+        message: JSON.stringify({ type: "user_message", role: "user", text: userMsg }),
+      }).catch(() => {});
     }
     currentHistory.push({ role: "user", parts: [{ text: userMsg }] });
     setMessages(prev => [...prev, { role: "user", text: userMsg }]);
@@ -602,21 +598,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         const fc = result.functionCall;
         const accompanyingText = result.text || "";
         
-        let approved = true;
-        if (fc.name === "write_file" || fc.name === "run_command") {
-          if (confirmMode === "confirm") {
-            approved = false;
-          } else if (confirmMode === "project") {
-            if (fc.name === "write_file") {
-              const filePath = fc.args.path || "";
-              const normalizedRoot = projectRoot.replace(/\\/g, "/").toLowerCase();
-              const normalizedPath = filePath.replace(/\\/g, "/").toLowerCase();
-              approved = !!projectRoot && (normalizedPath.startsWith(normalizedRoot) || (!filePath.includes(":/") && !filePath.includes(":\\")));
-            } else {
-              approved = !!projectRoot;
-            }
-          }
-        }
+        // In confirm mode, write_file and run_command require user approval.
+        // In auto mode, everything runs without prompting.
+        const approved = confirmMode === "auto" || (fc.name !== "write_file" && fc.name !== "run_command");
         
         if (!approved) {
           if (accompanyingText) {
@@ -658,7 +642,7 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
             case "write_file": { const r = await writeFile(safeArgs.path, safeArgs.content); funcResult = r.ok ? "File written." : ("Error: " + r.error); break; }
             case "list_directory": { const r = await listDirectory(safeArgs.path); funcResult = r.ok ? ((r.entries || []).join("\n")) : ("Error: " + r.error); break; }
             case "web_search": { funcResult = await searchWeb(safeArgs.query); break; }
-            case "run_command": { const r = await runShellCommand(safeArgs.command, capturedRoot || undefined); funcResult = formatCommandResult(r); break; }
+            case "run_command": { const r = await runShellCommand(safeArgs.command, undefined); funcResult = formatCommandResult(r); break; }
             default: funcResult = "Unknown function: " + fc.name;
           }
         } catch (err) { funcResult = "Execution error: " + err; }
@@ -674,6 +658,12 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
         if (onRoute) { const m = responseText.match(/\[ROUTE:(\w+)\]/); if (m) onRoute(m[1]); }
         setMessages(prev => [...prev, { role: "model", text: responseText }]);
         currentHistory.push({ role: "model", parts: [{ text: responseText }] });
+        // Broadcast model response to companion clients
+        if (invoke) {
+          invoke("companion_broadcast", {
+            message: JSON.stringify({ type: "agent_message", role: "model", text: responseText }),
+          }).catch(() => {});
+        }
       }
       if (result && result.done) done = true;
     }
@@ -703,14 +693,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           </select>
           <span style={headerSep}>·</span>
           <select value={confirmMode} onChange={e => setConfirmMode(e.target.value as any)} style={selectStyle} title="Write & Command Confirmation Mode">
-            <option value="confirm">🔒 Confirm</option>
-            <option value="project">📁 Auto (Proj)</option>
+            <option value="confirm">🔒 Confirm writes</option>
             <option value="auto">⚡ Auto (All)</option>
           </select>
-          <span style={headerSep}>·</span>
-          <input type="text" value={projectRoot} onChange={e => setProjectRoot(e.target.value)} placeholder="Project root..." style={rootInputStyle} title="Project root path" />
-          <input type="file" ref={fileInputRef} style={{ display: "none" }} {...{ webkitdirectory: "" }} onChange={e => { const files = e.target.files; if (files && files.length > 0) { setProjectRoot((files[0] as any).path || files[0].webkitRelativePath.split("/")[0]); } }} />
-          <button type="button" style={browseButton} onClick={() => fileInputRef.current?.click()}>📁</button>
           <span style={headerSep}>·</span>
           {/* Font controls */}
           <div style={modeGroup}>
@@ -721,11 +706,9 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
           <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.max(10, s - 1))} title="Decrease font size">A−</button>
           <button type="button" style={modeButton} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
           <span style={headerSep}>·</span>
-          <input type="text" value={memoryPath} onChange={e => setMemoryPath(e.target.value)} placeholder="memory.md" style={pathInputStyle} title="Memory file path" />
-          <input type="text" value={agentsPath} onChange={e => setAgentsPath(e.target.value)} placeholder="agents.md" style={pathInputStyle} title="Agent instructions path" />
-          <span style={headerSep}>·</span>
           <input type="text" value={messengerCode} onChange={e => setMessengerCode(e.target.value)} placeholder="Messenger code..." style={pathInputStyle} title="Paste Messenger Link Code from website (JWT)" />
           <div style={headerRight}>
+
             <button type="button" style={copyLogButton} onClick={() => { const t = messages.map(m => m.role + ": " + m.text).join("\n\n"); navigator.clipboard.writeText(t).then(() => {}); }} title="Copy session">📋 Copy</button>
             <button type="button" style={copyLogButton} onClick={() => { setMessages([]); }} title="Clear session">🗑️ Clear</button>
             <button type="button" style={resetKeyButton} onClick={onReset} title="Reset API key">Reset</button>

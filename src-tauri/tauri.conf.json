@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Maru Desktop",
+  "productName": "Nami Agent",
   "version": "0.0.9",
-  "identifier": "io.maru.desktop.tauri",
+  "identifier": "io.maru.desktop.namiagent",
   "build": {
     "beforeDevCommand": "node ./scripts/prepare-tauri-frontend.mjs",
     "beforeBuildCommand": "node ./scripts/prepare-tauri-frontend.mjs",

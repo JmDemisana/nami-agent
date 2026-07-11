@@ -1,7 +1,7 @@
 [package]
-name = "maru_desktop_tauri"
+name = "nami_agent_tauri"
 version = "0.0.9"
-description = "Tauri shell for Maru desktop applets"
+description = "Tauri shell for Nami Agent desktop applets"
 authors = ["Maru"]
 license = "GPL-3.0"
 edition = "2021"
@@ -13,12 +13,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 axum = "0.8.6"
-futures-util = "0.3.31"
+futures-util = { version = "0.3.31", features = ["sink"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tauri = { version = "2", features = [] }
-tokio = { version = "1.48.0", features = ["net", "rt-multi-thread"] }
+tokio = { version = "1.48.0", features = ["net", "rt-multi-thread", "sync"] }
+tokio-tungstenite = "0.26"
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [profile.release]

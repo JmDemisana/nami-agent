@@ -8,7 +8,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use futures_util::TryStreamExt;
+use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -21,7 +21,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    sync::broadcast,
+};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use uuid::Uuid;
 
 const RENDER_BACKEND_ORIGIN: &str = "https://maru-website.onrender.com";
@@ -29,21 +33,28 @@ const SECURE_STORE_FILE_NAME: &str = "secure-store.json";
 const FILES_MIRROR_FOLDER_NAME: &str = "files-structure-mirror";
 const DRAG_SESSION_TTL_MS: u64 = 10 * 60 * 1000;
 
+/// Broadcast channel for the Nami companion WebSocket server.
+/// Desktop agent messages are sent here; all connected mobile clients receive them.
+type CompanionBroadcast = broadcast::Sender<String>;
+
 #[derive(Clone)]
 struct DesktopRuntimeState {
     client: Client,
     drag_sessions: Arc<Mutex<HashMap<String, DragDownloadSession>>>,
     drag_server_origin: Arc<Mutex<Option<String>>>,
     gemini_key_index: Arc<Mutex<usize>>,
+    companion_tx: CompanionBroadcast,
 }
 
 impl DesktopRuntimeState {
     fn new() -> Self {
+        let (companion_tx, _) = broadcast::channel(64);
         Self {
             client: Client::new(),
             drag_sessions: Arc::new(Mutex::new(HashMap::new())),
             drag_server_origin: Arc::new(Mutex::new(None)),
             gemini_key_index: Arc::new(Mutex::new(0)),
+            companion_tx,
         }
     }
 
@@ -58,6 +69,11 @@ impl DesktopRuntimeState {
         if let Ok(mut guard) = self.drag_server_origin.lock() {
             *guard = Some(origin);
         }
+    }
+
+    /// Broadcast a JSON message to all connected companion clients.
+    fn broadcast_companion(&self, msg: &str) {
+        let _ = self.companion_tx.send(msg.to_string());
     }
 }
 
@@ -326,7 +342,7 @@ fn build_files_mirror(
         .map_err(|error| format!("Could not create the Files mirror folders. {error}"))?;
 
     let readme = [
-        "Maru Desktop Files Mirror",
+        "Nami Agent Files Mirror",
         "",
         if writable {
             "Elevation was active when this mirror was generated."
@@ -532,7 +548,7 @@ async fn start_drag_download_server(state: DesktopRuntimeState) -> Result<String
 
     tauri::async_runtime::spawn(async move {
         if let Err(error) = axum::serve(listener, router).await {
-            eprintln!("[maru-desktop-tauri] drag-download server failed: {error}");
+            eprintln!("[nami-agent-tauri] drag-download server failed: {error}");
         }
     });
 
@@ -1465,6 +1481,88 @@ async fn nami_agent_web_search(
     Err("Web search: all keys exhausted.".to_string())
 }
 
+/* ── Nami Companion WebSocket server ─────────────────────────────────── */
+
+/// Start the companion WebSocket server on port 7474.
+/// Mobile clients connect to ws://<desktop-ip>:7474/nami-companion
+/// and receive a mirror of the desktop Nami agent conversation.
+async fn start_companion_server(tx: CompanionBroadcast) -> Result<(), String> {
+    let listener = TcpListener::bind("0.0.0.0:7474")
+        .await
+        .map_err(|e| format!("Companion server bind failed: {e}"))?;
+
+    eprintln!("[nami-companion] WebSocket server listening on ws://0.0.0.0:7474/nami-companion");
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, addr)) = listener.accept().await else { continue };
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                let ws_stream = match tokio_tungstenite::accept_async(stream).await {
+                    Ok(ws) => ws,
+                    Err(e) => {
+                        eprintln!("[nami-companion] WS handshake error from {addr}: {e}");
+                        return;
+                    }
+                };
+                eprintln!("[nami-companion] Client connected: {addr}");
+
+                let mut rx = tx_clone.subscribe();
+                let (mut ws_sink, mut ws_source) = ws_stream.split();
+
+                // Greet the client
+                let _ = ws_sink.send(WsMessage::Text(
+                    r#"{"type":"pong"}"#.to_string().into()
+                )).await;
+
+                loop {
+                    tokio::select! {
+                        // Forward broadcast messages to this mobile client
+                        Ok(msg) = rx.recv() => {
+                            if ws_sink.send(WsMessage::Text(msg.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        // Receive messages from the mobile client
+                        msg = ws_source.next() => {
+                            match msg {
+                                Some(Ok(WsMessage::Text(text))) => {
+                                    // Echo mobile user messages back to all clients as user_message
+                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                                        if parsed["type"] == "ping" {
+                                            let _ = ws_sink.send(WsMessage::Text(
+                                                r#"{"type":"pong"}"#.to_string().into()
+                                            )).await;
+                                        } else if parsed["type"] == "user_message" {
+                                            // Broadcast to all other companions so they see the mobile input
+                                            let _ = tx_clone.send(text.to_string());
+                                        }
+                                    }
+                                }
+                                Some(Ok(WsMessage::Close(_))) | None => break,
+                                Some(Err(e)) => {
+                                    eprintln!("[nami-companion] WS error from {addr}: {e}");
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                eprintln!("[nami-companion] Client disconnected: {addr}");
+            });
+        }
+    });
+
+    Ok(())
+}
+
+/// Tauri command — broadcast a desktop agent message to all companion clients.
+#[tauri::command]
+fn companion_broadcast(state: State<DesktopRuntimeState>, message: String) {
+    state.broadcast_companion(&message);
+}
+
 fn main() {
     let runtime_state = DesktopRuntimeState::new();
     let server_state = runtime_state.clone();
@@ -1489,21 +1587,26 @@ fn main() {
             nami_agent_list_directory,
             nami_agent_web_search,
             nami_agent_run_command,
-            nami_agent_get_cwd
+            nami_agent_get_cwd,
+            companion_broadcast
         ])
         .setup(move |app| {
             if let Err(error) = tauri::async_runtime::block_on(async {
                 let origin = start_drag_download_server(server_state.clone()).await?;
                 server_state.set_drag_server_origin(origin);
+                // Start companion WebSocket server
+                if let Err(e) = start_companion_server(server_state.companion_tx.clone()).await {
+                    eprintln!("[nami-companion] server disabled: {e}");
+                }
                 Ok::<(), String>(())
             }) {
-                eprintln!("[maru-desktop-tauri] drag-download bridge disabled: {error}");
+                eprintln!("[nami-agent-tauri] setup error: {error}");
             }
 
             let main_url = WebviewUrl::App("tauri-launcher.html".into());
 
             WebviewWindowBuilder::new(app, "main", main_url)
-                .title("Maru Desktop")
+                .title("Nami Agent")
                 .inner_size(1480.0, 940.0)
                 .min_inner_size(1080.0, 720.0)
                 .resizable(true)
@@ -1513,5 +1616,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Maru Desktop");
+        .expect("error while running Nami Agent");
 }

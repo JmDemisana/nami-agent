@@ -5,12 +5,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUNDLE_ROOT="$PROJECT_ROOT/src-tauri/target/release/bundle/dmg"
 
 log() {
-  printf '\n[maru-desktop] %s\n' "$1"
+  printf '\n[nami-agent] %s\n' "$1"
 }
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    printf '[maru-desktop] Missing required command: %s\n' "$1" >&2
+    printf '[nami-agent] Missing required command: %s\n' "$1" >&2
     exit 1
   fi
 }
@@ -20,8 +20,8 @@ ensure_xcode_tools() {
     return
   fi
 
-  printf '[maru-desktop] Xcode Command Line Tools are required.\n' >&2
-  printf '[maru-desktop] Run `xcode-select --install`, finish that install, then rerun this script.\n' >&2
+  printf '[nami-agent] Xcode Command Line Tools are required.\n' >&2
+  printf '[nami-agent] Run `xcode-select --install`, finish that install, then rerun this script.\n' >&2
   exit 1
 }
 
@@ -30,8 +30,8 @@ ensure_homebrew() {
     return
   fi
 
-  printf '[maru-desktop] Homebrew is required to install Node.js on macOS.\n' >&2
-  printf '[maru-desktop] Install Homebrew first, then rerun this script.\n' >&2
+  printf '[nami-agent] Homebrew is required to install Node.js on macOS.\n' >&2
+  printf '[nami-agent] Install Homebrew first, then rerun this script.\n' >&2
   exit 1
 }
 
@@ -69,18 +69,18 @@ install_app_from_dmg() {
   dmg_path="$(find "$BUNDLE_ROOT" -type f -name '*.dmg' | sort | tail -n 1)"
 
   if [ -z "$dmg_path" ]; then
-    printf '[maru-desktop] No .dmg bundle was produced.\n' >&2
+    printf '[nami-agent] No .dmg bundle was produced.\n' >&2
     exit 1
   fi
 
-  mount_point="$(mktemp -d /tmp/maru-desktop.XXXXXX)"
+  mount_point="$(mktemp -d /tmp/nami-agent.XXXXXX)"
   log "Mounting $dmg_path"
   hdiutil attach "$dmg_path" -mountpoint "$mount_point" -nobrowse >/dev/null
 
   app_path="$(find "$mount_point" -maxdepth 1 -name '*.app' | head -n 1)"
   if [ -z "$app_path" ]; then
     hdiutil detach "$mount_point" >/dev/null || true
-    printf '[maru-desktop] Could not find an app bundle inside the dmg.\n' >&2
+    printf '[nami-agent] Could not find an app bundle inside the dmg.\n' >&2
     exit 1
   fi
 

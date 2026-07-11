@@ -1,10 +1,10 @@
-# Maru Desktop
+# Nami Agent
 
 Native desktop shell for [Maru](https://maru-website.onrender.com) — the personal web platform. Built with Tauri (Rust + WebView).
 
 ## What is this?
 
-Maru Desktop is a native window that wraps the Maru website's applets so they run offline-capable on your machine with direct access to your filesystem, without needing a browser tab.
+Nami Agent is a native window that wraps the Maru website's applets so they run offline-capable on your machine with direct access to your filesystem, without needing a browser tab.
 
 The main feature is **Nami**, a local AI agent powered by the Google Gemini API. Nami lives in the sidebar and can:
 
@@ -57,8 +57,8 @@ You should have received a copy of the GNU General Public License along with thi
 
 If you just want to run the app, grab the latest Windows release and run either:
 
-- `Maru-Desktop_0.0.9_x64-setup.exe`
-- `Maru-Desktop_0.0.9_x64_en-US.msi`
+- `Nami-Agent_0.0.9_x64-setup.exe`
+- `Nami-Agent_0.0.9_x64_en-US.msi`
 
 You do not need to build the project yourself for that.
 
@@ -77,8 +77,8 @@ You do not need to build the project yourself for that.
 
 1. Clone the repo:
 ```bash
-git clone https://github.com/JmDemisana/maru-desktop.git
-cd maru-desktop
+git clone https://github.com/JmDemisana/nami-agent.git
+cd nami-agent
 ```
 
 2. Install dependencies:
@@ -92,7 +92,7 @@ npm install
 npm run build:desktop-web
 
 # Copy the built folder into this repo:
-cp -r desktop-web-dist/ C:\path\to\maru-desktop\
+cp -r desktop-web-dist/ C:\path\to\nami-agent\
 ```
 
 ### Building for Windows
@@ -124,7 +124,7 @@ Linux bundles must be built on Linux.
 ### One-line install
 
 ```bash
-git clone https://github.com/JmDemisana/maru-desktop.git && cd maru-desktop && bash ./scripts/install-linux.sh
+git clone https://github.com/JmDemisana/nami-agent.git && cd nami-agent && bash ./scripts/install-linux.sh
 ```
 
 ### Building for Linux
@@ -151,7 +151,7 @@ macOS bundles must be built on macOS.
 ### One-line install
 
 ```bash
-git clone https://github.com/JmDemisana/maru-desktop.git && cd maru-desktop && bash ./scripts/install-macos.sh
+git clone https://github.com/JmDemisana/nami-agent.git && cd nami-agent && bash ./scripts/install-macos.sh
 ```
 
 ### Building for macOS

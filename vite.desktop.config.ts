@@ -7,7 +7,7 @@ import { rm } from "node:fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const maruRoot = resolve("C:\\Users\\jmdem\\Maru");
+const maruRoot = resolve("d:\\projects\\Maru");
 
 export default defineConfig({
   root: __dirname,

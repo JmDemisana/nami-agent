@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const CURRENT_VERSION = "0.0.9";
-const REPO = "JmDemisana/maru-desktop";
+const REPO = "JmDemisana/nami-agent";
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 

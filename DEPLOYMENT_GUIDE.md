@@ -1,16 +1,16 @@
-# Maru Desktop Deployment Guide
+# Nami Agent Deployment Guide
 
 This repo packages the desktop app as a Tauri shell around the shared web bundle that is built in the main `maru-website` repo.
 
 ## Repos
 
 - `maru-website`: owns the shared frontend bundle and desktop applet routes.
-- `maru-desktop`: owns the native Tauri shell, packaging, and desktop-only bridge code.
+- `nami-agent`: owns the native Tauri shell, packaging, and desktop-only bridge code.
 - `maru-mobile`: owns the Android-native app work.
 
 ## Local Release Flow
 
-Maru Desktop releases are built locally, not through GitHub Actions.
+Nami Agent releases are built locally, not through GitHub Actions.
 
 1. Build the desktop web bundle in `maru-website`.
 
@@ -24,7 +24,7 @@ npm run build:desktop-web
 3. Build the Tauri release here.
 
 ```bash
-cd C:\Users\jmdem\maru-desktop
+cd C:\Users\jmdem\nami-agent
 npm install
 npm run tauri:build
 ```

@@ -22,7 +22,7 @@ const THEME_OPTIONS: Array<{
   {
     value: "it_started_here",
     label: "It Started Here",
-    copy: "The current Maru look.",
+    copy: "The current Nami look.",
   },
   {
     value: "quiet_tide",
