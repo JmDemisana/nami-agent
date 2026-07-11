@@ -338,6 +338,56 @@
       </div>
     </div>
     <script>
+      // Global Error Overlay for Debugging
+      (function setupGlobalErrorOverlay() {
+        const createErrorUI = (msg, src, line, col, err) => {
+          const div = document.createElement("div");
+          div.id = "global-debug-error";
+          div.style.position = "fixed";
+          div.style.bottom = "10px";
+          div.style.left = "10px";
+          div.style.right = "10px";
+          div.style.background = "#8b0000";
+          div.style.color = "#ffffff";
+          div.style.padding = "10px 15px";
+          div.style.borderRadius = "6px";
+          div.style.fontFamily = "Consolas, monospace";
+          div.style.fontSize = "12px";
+          div.style.zIndex = "999999";
+          div.style.border = "1px solid #ff4500";
+          div.style.boxShadow = "0 4px 15px rgba(0,0,0,0.5)";
+          div.style.maxHeight = "200px";
+          div.style.overflowY = "auto";
+          div.innerHTML = `<strong>⚠️ Nami Agent Runtime Error:</strong><br>${msg}<br><span style="opacity:0.7">at ${src || "unknown"}:${line || 0}:${col || 0}</span>`;
+          if (err && err.stack) {
+            div.innerHTML += `<pre style="margin:5px 0 0 0; font-size:10px; opacity:0.8; white-space:pre-wrap;">${err.stack}</pre>`;
+          }
+          document.body.appendChild(div);
+        };
+        window.onerror = function(msg, src, line, col, err) {
+          createErrorUI(msg, src, line, col, err);
+          return false;
+        };
+        window.addEventListener("unhandledrejection", function(event) {
+          createErrorUI(event.reason?.message || event.reason || "Unhandled Promise Rejection", "", 0, 0, event.reason);
+        });
+        // Catch iframe errors too
+        window.addEventListener("load", () => {
+          const iframe = document.getElementById("desktop-frame");
+          if (iframe) {
+            iframe.addEventListener("error", (e) => {
+              createErrorUI("Iframe load failed", iframe.src, 0, 0);
+            });
+            try {
+              iframe.contentWindow.onerror = function(msg, src, line, col, err) {
+                createErrorUI("[Iframe] " + msg, src, line, col, err);
+                return false;
+              };
+            } catch(e) {}
+          }
+        });
+      })();
+
       const RENDER_BACKEND_ORIGIN = "https://maru-website.onrender.com";
 
       const tauriInvoke = window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core);

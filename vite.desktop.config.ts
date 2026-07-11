@@ -43,7 +43,7 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       input: {
-        desktopShell: resolve(__dirname, "desktop-shell.html"),
+        "desktop-shell": resolve(__dirname, "desktop-shell.html"),
       },
     },
   },

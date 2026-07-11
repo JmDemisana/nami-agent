@@ -1686,6 +1686,8 @@ fn main() {
                 .min_inner_size(1080.0, 720.0)
                 .resizable(true)
                 .decorations(false)
+                .visible(true)
+                .focused(true)
                 .build()?;
 
             Ok(())
