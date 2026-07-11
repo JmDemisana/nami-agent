@@ -887,11 +887,6 @@ function NamiAgentChat({ onRoute, compact, hideTitlebar, onReset }: NamiAgentPro
               <button type="button" style={{ ...modeButton, padding: "0.15rem 0.35rem" }} onClick={() => setFontSizePx(s => Math.min(24, s + 1))} title="Increase font size">A+</button>
             </div>
 
-            {/* Messenger Connection capsule */}
-            <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", background: "rgba(0,0,0,0.2)", borderRadius: 6, padding: "0.15rem 0.45rem", border: "1px solid rgba(255,255,255,0.06)", height: 21, boxSizing: "border-box" }}>
-              <span style={{ fontSize: "0.68rem", opacity: 0.6 }} title="Messenger Sync Link Code">🔑</span>
-              <input type="text" value={messengerCode} onChange={e => setMessengerCode(e.target.value)} placeholder="Messenger sync..." style={pathInputStyle} title="Paste Messenger Link Code from website (JWT)" />
-            </div>
 
             {/* Action pills */}
             <div style={{ display: "flex", gap: "0.25rem" }}>
