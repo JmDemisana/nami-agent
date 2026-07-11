@@ -12,6 +12,13 @@ import ClassScheduleEditor from "../pages/ClassScheduleEditor";
 import Tiertrack from "../pages/Tiertrack";
 import LyricsDatabase from "../pages/LyricsDatabase";
 import NamiProof from "../pages/NamiProof";
+import Onu from "../pages/Onu";
+import TyperShork from "../pages/TyperShork";
+import CurrenC from "../pages/CurrenC";
+import ArtworkFinder from "../pages/ArtworkFinder";
+import NanamiLorebook from "../pages/NanamiLorebook";
+import KhenAcademy from "../pages/KhenAcademy";
+import AniList from "../pages/AniList";
 import DesktopOptions from "./DesktopOptions";
 import UpdateChecker from "./UpdateChecker";
 import "../index.css";
@@ -19,7 +26,7 @@ import "../App.css";
 import "./desktop.css";
 import { applyDesktopAppearance } from "./settings";
 
-type AppletId = "cup-cupper-cuppers" | "dael-or-no-dael" | "tup-grade-solver" | "photo-serve" | "options" | "apple-music-game" | "wordel" | "class-schedule-editor" | "tiertrack" | "lyrics-database" | "namiproof" | null;
+type AppletId = "cup-cupper-cuppers" | "dael-or-no-dael" | "tup-grade-solver" | "photo-serve" | "options" | "apple-music-game" | "wordel" | "class-schedule-editor" | "tiertrack" | "lyrics-database" | "namiproof" | "onu" | "typer-shork" | "currenc" | "artwork-finder" | "nanami-lorebook" | "khenacademy" | "anilist" | null;
 
 const APPLET_ROUTE_MAP: Record<string, AppletId> = {
   CUP: "cup-cupper-cuppers",
@@ -33,6 +40,13 @@ const APPLET_ROUTE_MAP: Record<string, AppletId> = {
   TIER: "tiertrack",
   LRC: "lyrics-database",
   PROOF: "namiproof",
+  ONU: "onu",
+  TYPER: "typer-shork",
+  CURRENC: "currenc",
+  ART: "artwork-finder",
+  LORE: "nanami-lorebook",
+  KHEN: "khenacademy",
+  ANILIST: "anilist",
   HOME: null as any,
 };
 
@@ -48,9 +62,16 @@ const APPLET_COMPONENTS: Record<string, React.FC> = {
   "tiertrack": Tiertrack,
   "lyrics-database": LyricsDatabase,
   "namiproof": NamiProof,
+  "onu": Onu,
+  "typer-shork": TyperShork,
+  "currenc": CurrenC,
+  "artwork-finder": ArtworkFinder,
+  "nanami-lorebook": NanamiLorebook,
+  "khenacademy": KhenAcademy,
+  "anilist": AniList,
 };
 
-const NEEDS_ROUTER = new Set(["apple-music-game", "wordel", "lyrics-database"]);
+const NEEDS_ROUTER = new Set(["apple-music-game", "wordel", "lyrics-database", "onu", "typer-shork", "nanami-lorebook", "khenacademy", "anilist"]);
 
 function AppletContent({ applet }: { applet: string }) {
   const Component = APPLET_COMPONENTS[applet];
