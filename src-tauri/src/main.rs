@@ -1088,22 +1088,32 @@ async fn gemini_chat(
     let max_output_tokens = clamp_max_output_tokens(request.max_output_tokens);
     let thinking_budget = request.thinking_budget.unwrap_or(0).clamp(0, 24576);
 
+    let mut generation_config = serde_json::json!({
+        "temperature": 0.2,
+        "maxOutputTokens": max_output_tokens,
+    });
+
+    if thinking_budget > 0 {
+        if let Some(obj) = generation_config.as_object_mut() {
+            obj.insert(
+                "thinkingConfig".to_string(),
+                serde_json::json!({
+                    "thinkingBudget": thinking_budget
+                }),
+            );
+        }
+    }
+
     let body = serde_json::json!({
-        "system_instruction": system_instruction,
+        "systemInstruction": system_instruction,
         "contents": contents,
         "tools": tools,
-        "tool_config": {
-            "function_calling_config": {
+        "toolConfig": {
+            "functionCallingConfig": {
                 "mode": "AUTO"
             }
         },
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": max_output_tokens,
-            "thinkingConfig": {
-                "thinkingBudget": thinking_budget
-            }
-        }
+        "generationConfig": generation_config
     });
 
     // Strategy: avoid model fallback. It costs requests and can hit the same free-tier bucket.
